@@ -73,11 +73,19 @@ import { downloadReport } from "./include/download";
 
   $(document).on("click", ".wpe-pcc-php-version-errors", function (event) {
     event.preventDefault();
-    const phpVersion = $(this).data("php-version");
-    const reports = $(this).closest(".wpe-pcc-alert").find("#wpe_pcc_reports");
-    const report = reports.find(`[data-php-version="${phpVersion}"]`);
+    const button = $(this);
+    const phpVersion = button.data("php-version");
+    const report = button
+      .closest(".wpe-pcc-alert")
+      .find(`.wpe-pcc-php-version-report[data-php-version="${phpVersion}"]`);
+    const opening = !report.is(":visible");
+
+    // Only one report open at a time.
     $(".wpe-pcc-php-version-report").not(report).hide();
-    $(report).toggle();
+    $(".wpe-pcc-php-version-errors").not(button).attr("aria-expanded", "false");
+
+    report.toggle(opening);
+    button.attr("aria-expanded", opening ? "true" : "false");
   });
 
   $(document).on(
@@ -85,7 +93,13 @@ import { downloadReport } from "./include/download";
     ".wpe-pcc-php-version-report-close",
     function (event) {
       event.preventDefault();
-      $(this).closest(".wpe-pcc-php-version-report").hide();
+      const report = $(this).closest(".wpe-pcc-php-version-report");
+      report.hide();
+      report
+        .closest(".wpe-pcc-alert")
+        .find(`.wpe-pcc-php-version-errors[data-php-version="${report.data("php-version")}"]`)
+        .attr("aria-expanded", "false")
+        .trigger("focus");
     }
   );
 

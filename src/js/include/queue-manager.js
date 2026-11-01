@@ -1,7 +1,7 @@
 import { updateResultFailure, updateResult } from "./render";
 import $ from "jquery";
 import { hideDownload, showDownload } from "./download";
-import { __, sprintf } from "@wordpress/i18n";
+import { __, _n, sprintf } from "@wordpress/i18n";
 
 const progress = $(".wpe-progress-active");
 const progressCount = $(".wpe-pcc-progress-count");
@@ -21,6 +21,7 @@ export function initQueue(itemsToScan, mode) {
   hideDownload();
   resetProgress();
   $(".wpe-pcc-information").hide();
+  $("#wpe-pcc-summary").empty();
   $("#testResults").val("");
 
   itemsToScan.plugins.forEach((plugin) => {
@@ -141,8 +142,10 @@ export function runNextJob() {
   if (window.phpcompat.queue.length === 0) {
     resetProgress();
     showDownload();
+    renderSummary();
+
     // Only offer help when something actually failed.
-    if ($(".wpe-pcc-alert-error").length) {
+    if ($('[data-result="problems"]').length) {
       $(".wpe-pcc-information").show();
     }
     return;
@@ -176,4 +179,45 @@ function resetProgress() {
   $(".wpe-pcc-spinner").hide();
   progressCount.text("");
   progress.hide();
+}
+
+/**
+ * One-line summary of the finished scan, e.g. "3 pass · 2 have problems".
+ */
+function renderSummary() {
+  const count = (result) => $(`#wpe_pcc_results [data-result="${result}"]`).length;
+  const parts = [
+    {
+      key: "success",
+      n: count("success"),
+      /* translators: %d: number of plugins and themes. */
+      text: (n) => sprintf(_n("%d passes", "%d pass", n, "php-compatibility-checker"), n),
+    },
+    {
+      key: "problems",
+      n: count("problems"),
+      /* translators: %d: number of plugins and themes. */
+      text: (n) => sprintf(_n("%d has problems", "%d have problems", n, "php-compatibility-checker"), n),
+    },
+    {
+      key: "skipped",
+      n: count("skipped"),
+      /* translators: %d: number of plugins and themes. */
+      text: (n) => sprintf(_n("%d not checked", "%d not checked", n, "php-compatibility-checker"), n),
+    },
+    {
+      key: "failed",
+      n: count("failed"),
+      /* translators: %d: number of plugins and themes. */
+      text: (n) => sprintf(_n("%d failed to scan", "%d failed to scan", n, "php-compatibility-checker"), n),
+    },
+  ].filter((part) => part.n > 0);
+
+  const summary = $("#wpe-pcc-summary").empty();
+  parts.forEach((part) => {
+    $("<span>")
+      .addClass(`wpe-pcc-summary-item wpe-pcc-summary-${part.key}`)
+      .text(part.text(part.n))
+      .appendTo(summary);
+  });
 }

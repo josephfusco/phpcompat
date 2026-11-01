@@ -82,10 +82,14 @@ class PHP_Compatibility_Checker {
 		$scan_css = '../build/scan.css';
 		$ajax_js  = '../build/scan.js';
 
+		// Use core's design tokens (WordPress 7.0+) when available. The stylesheet
+		// falls back to plain colors on older versions.
+		$style_deps = wp_style_is( 'wp-theme', 'registered' ) ? array( 'wp-theme' ) : array();
+
 		wp_enqueue_style(
 			'tide-checker',
 			plugins_url( $scan_css, __FILE__ ),
-			array(),
+			$style_deps,
 			$ajax_js_assets['version']
 		);
 
@@ -314,6 +318,7 @@ class PHP_Compatibility_Checker {
 
 		<div class="wrap wpe-pcc-wrap">
 			<h1><?php esc_html_e( 'PHP Compatibility Checker', 'php-compatibility-checker' ); ?></h1>
+			<div class="wpe-pcc-layout<?php echo function_exists( '\\is_wpe' ) && \is_wpe() ? ' wpe-pcc-has-aside' : ''; ?>">
 			<div class="wpe-pcc-main">
 				<p><?php esc_html_e( 'Check whether the plugins and themes on this site work with newer versions of PHP. It works on any WordPress site, on any host.', 'php-compatibility-checker' ); ?></p>
 				<p>
@@ -345,7 +350,7 @@ class PHP_Compatibility_Checker {
 								<th scope="row"></th>
 									<td>
 										<div class="wpe-pcc-run-scan">
-											<input name="run" id="runButton" type="button" value="<?php esc_html_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button-secondary" />
+											<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button button-primary" />
 											<div class="wpe-pcc-scan-information">
 												<span style="display:none; visibility:visible;" class="spinner wpe-pcc-spinner"></span>
 												<span class="wpe-progress-active" style="display:none;">
@@ -368,14 +373,15 @@ class PHP_Compatibility_Checker {
 					</h2>
 
 					<div id="wpe-pcc-download-report" class="wpe-pcc-download-report" style="display:none;">
-						<a id="downloadReport" class="button-primary" href="#"><span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download Report', 'php-compatibility-checker' ); ?></a>
-						<a class="wpe-pcc-clear-results" name="run" id="cleanupButton"><?php esc_html_e( 'Clear results', 'php-compatibility-checker' ); ?></a>
+						<button type="button" id="downloadReport" class="button wpe-pcc-button-with-icon"><?php $this->the_icon( 'download', 'download' ); ?> <?php esc_html_e( 'Download report', 'php-compatibility-checker' ); ?></button>
+						<button type="button" class="button-link wpe-pcc-clear-results" id="cleanupButton"><?php esc_html_e( 'Clear results', 'php-compatibility-checker' ); ?></button>
 						<label class="wpe-pcc-developer-mode">
 							<input type="checkbox" id="developermode" name="developermode" value="yes" />
 							<?php esc_html_e( 'View results as raw text', 'php-compatibility-checker' ); ?>
 						</label>
-						<hr>
 					</div> <!-- /wpe-pcc-download-report -->
+
+					<div id="wpe-pcc-summary" class="wpe-pcc-summary" role="status" aria-live="polite"></div>
 
 					<div id="wpe_pcc_results"></div>
 
@@ -383,15 +389,17 @@ class PHP_Compatibility_Checker {
 						<textarea readonly="readonly" id="testResults"></textarea>
 					</div>
 
-					<p class="wpe-pcc-attention">
-						<?php
-						printf(
-							/* translators: %s: hosting URL */
-							wp_kses_post( __( '<strong>Attention:</strong> Not all errors are show-stoppers. <a target="_blank" href="%s">Use LocalWP to test this site on PHP 8</a> to see if it just works!', 'php-compatibility-checker' ) ),
-							esc_url( 'https://localwp.com/' )
-						);
-						?>
-					</p>
+					<div class="notice notice-info inline wpe-pcc-attention">
+						<p>
+							<?php
+							printf(
+								/* translators: %s: hosting URL */
+								wp_kses_post( __( '<strong>Attention:</strong> Not all errors are show-stoppers. <a target="_blank" href="%s">Use LocalWP to test this site on PHP 8</a> to see if it just works!', 'php-compatibility-checker' ) ),
+								esc_url( 'https://localwp.com/' )
+							);
+							?>
+						</p>
+					</div>
 
 				</div> <!-- /wpe-pcc-results -->
 
@@ -436,7 +444,7 @@ class PHP_Compatibility_Checker {
 							</p>
 							<p><?php echo wp_kses_post( __( '<strong>Preview it:</strong> in the User Portal, open this environment and click <strong>Preview PHP</strong>. Only your browser sees the change.', 'php-compatibility-checker' ) ); ?></p>
 							<p><?php echo wp_kses_post( __( '<strong>Or use a copy:</strong> change PHP on a staging or development environment first.', 'php-compatibility-checker' ) ); ?></p>
-							<a target="_blank" class="wpe-pcc-button wpe-pcc-button-primary" href="<?php echo esc_url( $url_wpe_portal ); ?>"><?php echo esc_html( defined( 'PWP_NAME' ) ? __( 'Open this environment', 'php-compatibility-checker' ) : __( 'Open the User Portal', 'php-compatibility-checker' ) ); ?></a>
+							<a target="_blank" class="button button-primary wpe-pcc-aside-button" href="<?php echo esc_url( $url_wpe_portal ); ?>"><?php echo esc_html( defined( 'PWP_NAME' ) ? __( 'Open this environment', 'php-compatibility-checker' ) : __( 'Open the User Portal', 'php-compatibility-checker' ) ); ?></a>
 							<p><a target="_blank" href="<?php echo esc_url( $url_wpe_php_guide ); ?>"><?php esc_html_e( 'Read the WP Engine PHP guide', 'php-compatibility-checker' ); ?></a></p>
 						</div> <!-- /wpe-pcc-aside-content -->
 					</div> <!-- /wpe-pcc-get-hosting -->
@@ -445,85 +453,103 @@ class PHP_Compatibility_Checker {
 						<div class="wpe-pcc-aside-content">
 							<h2><?php esc_html_e( 'Need help fixing these issues?', 'php-compatibility-checker' ); ?></h2>
 							<p><?php esc_html_e( 'If an update doesn\'t fix a plugin or theme, or the problems are in custom code, a WP Engine agency partner can help.', 'php-compatibility-checker' ); ?></p>
-							<a target="_blank" class="wpe-pcc-button" href="<?php echo esc_url( $url_wpe_agency_partners ); ?>"><?php esc_html_e( 'Find a WP Engine partner', 'php-compatibility-checker' ); ?></a>
+							<a target="_blank" class="button wpe-pcc-aside-button" href="<?php echo esc_url( $url_wpe_agency_partners ); ?>"><?php esc_html_e( 'Find a WP Engine partner', 'php-compatibility-checker' ); ?></a>
 						</div> <!-- /wpe-pcc-aside-content -->
 					</div> <!-- /wpe-pcc-information -->
 
 				</div> <!-- /wpe-pcc-aside -->
 			<?php endif; ?>
+			</div> <!-- /wpe-pcc-layout -->
 
 		</div> <!-- /wpe-pcc-wrap -->
 
 		<script id="result-template" type="text/x-handlebars-template">
-			<div id="{{type}}_{{slug}}" class="wpe-pcc-alert wpe-pcc-alert-{{status}}">
-				<p>
-					{{#selectable}}
-					<label>
-						<input type="checkbox" class="wpe-pcc-select" value="{{type}}_{{slug}}" {{#checked}}checked="checked"{{/checked}} />
-						<strong>{{name}} {{version}}</strong>
-					</label>
-					{{/selectable}}
-					{{^selectable}}
-					<strong>{{name}} {{version}}</strong>
-					{{/selectable}}
-				</p>
+			<div id="{{type}}_{{slug}}" class="wpe-pcc-alert wpe-pcc-alert-{{status}}" data-result="{{badge}}">
+				<div class="wpe-pcc-card-header">
+					<p class="wpe-pcc-card-title">
+						{{#selectable}}
+						<label>
+							<input type="checkbox" class="wpe-pcc-select" value="{{type}}_{{slug}}" {{#checked}}checked="checked"{{/checked}} />
+							<strong>{{name}}</strong> <span class="wpe-pcc-card-version">{{version}}</span>
+						</label>
+						{{/selectable}}
+						{{^selectable}}
+						<strong>{{name}}</strong> <span class="wpe-pcc-card-version">{{version}}</span>
+						{{/selectable}}
+					</p>
+					{{#badge_success}}<span class="wpe-pcc-badge wpe-pcc-badge-success"><?php $this->the_icon( 'published', 'yes-alt' ); ?><?php esc_html_e( 'Passes', 'php-compatibility-checker' ); ?></span>{{/badge_success}}
+					{{#badge_problems}}<span class="wpe-pcc-badge wpe-pcc-badge-error"><?php $this->the_icon( 'error', 'warning' ); ?><?php esc_html_e( 'Problems found', 'php-compatibility-checker' ); ?></span>{{/badge_problems}}
+					{{#badge_skipped}}<span class="wpe-pcc-badge wpe-pcc-badge-warning"><?php $this->the_icon( 'caution', 'info' ); ?><?php esc_html_e( 'Not checked', 'php-compatibility-checker' ); ?></span>{{/badge_skipped}}
+					{{#badge_failed}}<span class="wpe-pcc-badge wpe-pcc-badge-error"><?php $this->the_icon( 'error', 'warning' ); ?><?php esc_html_e( 'Scan failed', 'php-compatibility-checker' ); ?></span>{{/badge_failed}}
+				</div>
 
 				{{#php.length}}
-					<p class="wpe-pcc-results">
+					<ul class="wpe-pcc-versions" aria-label="<?php esc_attr_e( 'PHP versions', 'php-compatibility-checker' ); ?>">
 						{{#php}}
 							{{#unsupported}}
-							<span class="wpe-pcc-php-version-unsupported dashicons-before dashicons-minus">{{phpversion}}</span>
+							<li class="wpe-pcc-chip wpe-pcc-chip-unsupported"><span class="screen-reader-text"><?php esc_html_e( 'Not counted:', 'php-compatibility-checker' ); ?> </span>{{phpversion}}</li>
 							{{/unsupported}}
 							{{^unsupported}}
 							{{#passed}}
-							<span class="wpe-pcc-php-version-passed dashicons-before dashicons-yes">{{phpversion}}</span>
+							<li class="wpe-pcc-chip wpe-pcc-chip-pass"><?php $this->the_icon( 'check', 'yes' ); ?><span class="screen-reader-text"><?php esc_html_e( 'Passes:', 'php-compatibility-checker' ); ?> </span>{{phpversion}}</li>
 							{{/passed}}
 							{{^passed}}
-							<a href="#" data-php-version="{{phpversion}}" data-target="report_{{type}}_{{slug}}_{{phpversion}}" class="wpe-pcc-php-version-errors dashicons-before dashicons-no-alt">{{phpversion}}</a>
+							<li><button type="button" class="wpe-pcc-chip wpe-pcc-chip-fail wpe-pcc-php-version-errors" data-php-version="{{phpversion}}" aria-expanded="false" aria-controls="report_{{type}}_{{slug}}_{{phpversion}}"><?php $this->the_icon( 'error', 'no-alt' ); ?><span class="screen-reader-text"><?php esc_html_e( 'Problems on', 'php-compatibility-checker' ); ?> </span>{{phpversion}}</button></li>
 							{{/passed}}
 							{{/unsupported}}
 						{{/php}}
+					</ul>
 
-						{{#has_errors}}
-							<div><?php esc_html_e( 'Click on PHP Version to see errors and warnings', 'php-compatibility-checker' ); ?></div>
-						{{/has_errors}}
-						{{#has_unsupported}}
-							<div class="wpe-pcc-unsupported-note">
-								<?php
-								printf(
-									/* translators: %s: minimum PHP version, e.g. 7.4 */
-									esc_html__( 'Versions in gray are below its minimum of PHP %s, so they aren\'t counted.', 'php-compatibility-checker' ),
-									'{{requires_php}}'
-								);
-								?>
-							</div>
-						{{/has_unsupported}}
-					</p>
+					{{#has_errors}}
+						<p class="wpe-pcc-hint"><?php esc_html_e( 'Select a version in red to see the problems.', 'php-compatibility-checker' ); ?></p>
+					{{/has_errors}}
+					{{#has_unsupported}}
+						<p class="wpe-pcc-hint">
+							<?php
+							printf(
+								/* translators: %s: minimum PHP version, e.g. 7.4 */
+								esc_html__( 'Versions in gray are below its minimum of PHP %s, so they aren\'t counted.', 'php-compatibility-checker' ),
+								'{{requires_php}}'
+							);
+							?>
+						</p>
+					{{/has_unsupported}}
 				{{/php.length}}
 
 				{{#custom_error}}
 					{{#skipped}}
-					<p>{{response.message}}</p>
+					<p class="wpe-pcc-message">{{response.message}}</p>
 					{{/skipped}}
 					{{^skipped}}
 					{{#response.status}}
-					<p><?php esc_html_e( 'Response status:', 'php-compatibility-checker' ); ?> {{.}}</p>
+					<p class="wpe-pcc-message"><?php esc_html_e( 'Response status:', 'php-compatibility-checker' ); ?> {{.}}</p>
 					{{/response.status}}
 					{{#response.message}}
-					<p><?php esc_html_e( 'Message:', 'php-compatibility-checker' ); ?> {{.}}</p>
+					<p class="wpe-pcc-message"><?php esc_html_e( 'Message:', 'php-compatibility-checker' ); ?> {{.}}</p>
 					{{/response.message}}
 					{{#response.errors}}
-					<p>{{message}}</p>
+					<p class="wpe-pcc-message">{{message}}</p>
 					{{/response.errors}}
 					{{/skipped}}
 				{{/custom_error}}
 
 				{{#reports.length}}
-				<div id="wpe_pcc_reports">
+				<div class="wpe-pcc-reports">
 					{{#reports}}
 					<div id="report_{{type}}_{{slug}}_{{phpversion}}" data-php-version="{{phpversion}}" class="wpe-pcc-php-version-report" style="display:none">
-						<h4>PHP {{phpversion}} <a href="#" class="wpe-pcc-php-version-report-close"><?php esc_html_e( 'close', 'php-compatibility-checker' ); ?></a></h4>
-						<textarea readonly="readonly">{{#messages}}
+						<div class="wpe-pcc-report-header">
+							<h4>
+								<?php
+								printf(
+									/* translators: %s: PHP version, e.g. 7.4 */
+									esc_html__( 'Problems on PHP %s', 'php-compatibility-checker' ),
+									'{{phpversion}}'
+								);
+								?>
+							</h4>
+							<button type="button" class="button-link wpe-pcc-php-version-report-close"><?php esc_html_e( 'Close', 'php-compatibility-checker' ); ?></button>
+						</div>
+						<textarea readonly="readonly" aria-label="<?php esc_attr_e( 'Problem details', 'php-compatibility-checker' ); ?>">{{#messages}}
 {{.}}
 {{/messages}}</textarea>
 					</div>
@@ -534,6 +560,49 @@ class PHP_Compatibility_Checker {
 		</script>
 
 		<?php
+	}
+
+	/**
+	 * Icon markup: a core SVG icon on WordPress 7.1+, a Dashicon before that.
+	 *
+	 * WordPress 7.2 replaces Dashicons in the admin with icons from the
+	 * WordPress icon library, so this keeps the page consistent with core.
+	 *
+	 * @since 1.6.5
+	 *
+	 * @param string $name     Core icon name, without the "core/" prefix.
+	 * @param string $dashicon Dashicon name, without the "dashicons-" prefix, for older WordPress.
+	 * @return string
+	 */
+	public function get_icon( $name, $dashicon ) {
+		if ( function_exists( 'wp_get_icon' ) ) {
+			$svg = wp_get_icon(
+				'core/' . $name,
+				array(
+					'size'  => 16,
+					'class' => 'wpe-pcc-icon',
+				)
+			);
+
+			if ( $svg ) {
+				return $svg;
+			}
+		}
+
+		return '<span class="wpe-pcc-icon dashicons dashicons-' . esc_attr( $dashicon ) . '" aria-hidden="true"></span>';
+	}
+
+	/**
+	 * Echo an icon. See get_icon().
+	 *
+	 * @since 1.6.5
+	 *
+	 * @param string $name     Core icon name.
+	 * @param string $dashicon Fallback Dashicon name.
+	 */
+	public function the_icon( $name, $dashicon ) {
+		// SVG markup comes from core's icon registry; the fallback is built with esc_attr().
+		echo $this->get_icon( $name, $dashicon ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 	}
 
 	/**

@@ -87,6 +87,8 @@ Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back
 == Changelog ==
 
 = Unreleased =
+- Refresh the scan page for WordPress 7.2: core SVG icons (with Dashicons fallback on older versions), WordPress design tokens, a status label on each result, PHP versions as chips, a results summary, core buttons and notices, and a layout that stacks on narrow screens.
+- Accessibility: failing PHP versions are buttons with expanded/collapsed state, results don't rely on color alone, and closing a report returns focus to its version.
 - Add a "Choose which plugins and themes to scan" option to scan only selected items.
 - Respect each plugin's and theme's "Requires PHP": PHP versions below it are shown in gray as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.
 - Fix PHP 8.2 "Creation of dynamic property" deprecation notice.

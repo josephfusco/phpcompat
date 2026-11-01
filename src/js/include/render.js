@@ -128,6 +128,7 @@ export function updateResult(response, job) {
   }
 
   view.status = hasProblems ? "error" : "success";
+  setBadge(view, hasProblems ? "problems" : "success");
   view.has_unsupported = phpVersions.some(isUnsupported);
 
   view.php = [];
@@ -251,6 +252,7 @@ export function updateResultFailure(response, job) {
     skipped,
     response: response,
   };
+  setBadge(view, skipped ? "skipped" : "failed");
 
   const output = Mustache.render(template, view);
   resultItem.replaceWith(output);
@@ -273,4 +275,12 @@ export function updateResultFailure(response, job) {
     fullReport + (fullReport.length ? "\n\n\n" : "") + rawReport;
 
   $("#testResults").val(updatedReport);
+}
+
+/**
+ * Set the card's status label: success, problems, skipped, or failed.
+ */
+function setBadge(view, badge) {
+  view.badge = badge;
+  view[`badge_${badge}`] = true;
 }
