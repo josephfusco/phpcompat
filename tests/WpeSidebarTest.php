@@ -104,4 +104,15 @@ class WpeSidebarTest extends TestCase {
 			$this->assertStringContainsString( $expected, $message );
 		}
 	}
+
+	public function test_sanitize_php_version() {
+		$this->assertSame( '7.4', PHP_Compatibility_Checker::sanitize_php_version( '7.4' ) );
+		$this->assertSame( '5.2.4', PHP_Compatibility_Checker::sanitize_php_version( ' 5.2.4 ' ) );
+		$this->assertSame( '8', PHP_Compatibility_Checker::sanitize_php_version( '8' ) );
+		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( '' ) );
+		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( '7.4+' ) );
+		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( '<script>' ) );
+		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( null ) );
+		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( false ) );
+	}
 }

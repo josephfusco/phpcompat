@@ -1,7 +1,7 @@
 import Mustache from "mustache";
 import $ from "jquery";
 import { compareVersions } from "compare-versions";
-import { __ } from "@wordpress/i18n";
+import { __, sprintf } from "@wordpress/i18n";
 
 export function initResults(itemsToScan, activeOnly) {
   const container = $("#wpe_pcc_results");
@@ -66,20 +66,64 @@ export function updateResult(response, job) {
     ...job,
   };
 
-  // Success if no errors.
-  view.status =
-    report.totals.errors === 0 && report.totals.warnings === 0
-      ? "success"
-      : "error";
-
   // Create index for PHP Versions.
   const phpVersions = Object.keys(report.versions).sort(compareVersions);
   let rawReport = `${job.name} ${job.version}\n\n`;
+
+  // Versions below the item's own "Requires PHP" can never run it, so problems
+  // there aren't real incompatibilities. Show them as "not counted" instead.
+  const requiresPhp = job.requires_php || "";
+  const isUnsupported = (phpVersion) =>
+    "" !== requiresPhp && compareVersions(phpVersion, requiresPhp) < 0;
+
+  const hasProblems = phpVersions.some((phpVersion) => {
+    if (isUnsupported(phpVersion)) {
+      return false;
+    }
+    const totals = report.versions[phpVersion]?.totals || {};
+    return (
+      report.incompatible.includes(phpVersion) ||
+      totals.errors > 0 ||
+      totals.warnings > 0
+    );
+  });
+
+  // If every reported version is below the minimum, nothing it can run on was
+  // checked (e.g. it requires PHP 8.3 but results stop at 8.0). Don't show that
+  // as a pass.
+  if (phpVersions.length && phpVersions.every(isUnsupported)) {
+    updateResultFailure(
+      {
+        status: "skipped",
+        message: sprintf(
+          /* translators: 1: plugin or theme name, 2: minimum PHP version, 3: newest PHP version with results. */
+          __(
+            "%1$s was not checked. It requires PHP %2$s or newer, and results only go up to PHP %3$s.",
+            "php-compatibility-checker"
+          ),
+          job.name,
+          requiresPhp,
+          phpVersions[phpVersions.length - 1]
+        ),
+      },
+      job
+    );
+    return;
+  }
+
+  view.status = hasProblems ? "error" : "success";
+  view.has_unsupported = phpVersions.some(isUnsupported);
 
   view.php = [];
   view.reports = [];
 
   phpVersions.forEach((phpVersion) => {
+    if (isUnsupported(phpVersion)) {
+      view.php.push({ phpversion: phpVersion, unsupported: true });
+      rawReport += `PHP ${phpVersion}: not counted (requires PHP ${requiresPhp})\n`;
+      return;
+    }
+
     view.php.push({
       phpversion: phpVersion,
       passed: report.compatible.includes(phpVersion),
@@ -122,9 +166,7 @@ export function updateResult(response, job) {
     }
   });
 
-  view.has_errors = !(
-    report.totals.errors === 0 && report.totals.warnings === 0
-  );
+  view.has_errors = hasProblems;
 
   const output = Mustache.render(template, view);
 
