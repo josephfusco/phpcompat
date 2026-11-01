@@ -59,3 +59,71 @@ if ( ! function_exists( 'is_wpe' ) ) {
 if ( get_option( 'phpcompat_e2e_is_wpe' ) && ! defined( 'PWP_NAME' ) ) {
 	define( 'PWP_NAME', 'e2esite' );
 }
+
+// Serve the same fake Tide responses to server-side requests (WP-CLI, abilities).
+add_filter(
+	'pre_http_request',
+	static function ( $preempt, $args, $url ) {
+		if ( 0 !== strpos( $url, 'https://wptide.org/api/v1/audit/' ) ) {
+			return $preempt;
+		}
+
+		$fixtures = json_decode( file_get_contents( __DIR__ . '/phpcompat-e2e-tide.json' ), true );
+		$parts    = explode( '/', wp_parse_url( $url, PHP_URL_PATH ) );
+		$slug     = isset( $parts[6] ) ? $parts[6] : '';
+		$fixture  = isset( $fixtures['items'][ $slug ] ) ? $fixtures['items'][ $slug ] : array( 'status' => 404 );
+
+		if ( 200 !== $fixture['status'] ) {
+			return array(
+				'headers'  => array(),
+				'body'     => wp_json_encode( array( 'message' => 'The audit requested does not exist.', 'status' => 404 ) ),
+				'response' => array( 'code' => 404, 'message' => 'Not Found' ),
+				'cookies'  => array(),
+				'filename' => null,
+			);
+		}
+
+		$versions = array();
+		foreach ( $fixtures['versions'] as $version ) {
+			$fails                = in_array( $version, $fixture['failing'], true );
+			$versions[ $version ] = array(
+				'totals' => array( 'errors' => $fails ? 1 : 0, 'warnings' => 0 ),
+				'files'  => $fails ? array(
+					'includes/legacy.php' => array(
+						'messages' => array(
+							array(
+								'message' => "Example problem on PHP $version",
+								'source'  => 'PHPCompatibility.Example.Found',
+								'type'    => 'ERROR',
+								'line'    => 42,
+							),
+						),
+					),
+				) : array(),
+			);
+		}
+
+		$body = array(
+			'status'  => 'complete',
+			'reports' => array(
+				'phpcs_phpcompatibilitywp' => array(
+					'report' => array(
+						'compatible'   => array_values( array_diff( $fixtures['versions'], $fixture['failing'] ) ),
+						'incompatible' => $fixture['failing'],
+						'versions'     => $versions,
+					),
+				),
+			),
+		);
+
+		return array(
+			'headers'  => array(),
+			'body'     => wp_json_encode( $body ),
+			'response' => array( 'code' => 200, 'message' => 'OK' ),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	},
+	10,
+	3
+);

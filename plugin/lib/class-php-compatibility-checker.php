@@ -239,8 +239,6 @@ class PHP_Compatibility_Checker {
 	 * @return array
 	 */
 	public function get_themes_to_scan() {
-		$themes_data = wp_prepare_themes_for_js();
-
 		/**
 		 * Filter which themes should be excluded from scans.
 		 *
@@ -252,25 +250,41 @@ class PHP_Compatibility_Checker {
 		 */
 		$excluded_themes = apply_filters( 'phpcompat_excluded_themes', array() );
 
-		// Exclude some themes.
-		$themes_data = array_filter(
-			$themes_data,
-			function ( $theme_data ) use ( $excluded_themes ) {
-				return ! in_array( $theme_data['name'], $excluded_themes, true );
-			}
-		);
+		// wp_get_themes() works in every context (wp-admin, WP-CLI, REST), unlike
+		// wp-admin's wp_prepare_themes_for_js(). "allowed" respects multisite settings.
+		$current = get_stylesheet();
+		$themes  = array();
 
-		$themes = array_map(
-			function ( $theme ) {
-				return array(
-					'slug'         => sanitize_title( $theme['id'] ),
-					'name'         => sanitize_text_field( $theme['name'] ),
-					'version'      => sanitize_text_field( $theme['version'] ),
-					'active'       => true === $theme['active'] ? 'yes' : 'no',
-					'requires_php' => self::sanitize_php_version( wp_get_theme( $theme['id'] )->get( 'RequiresPHP' ) ),
-				);
-			},
-			$themes_data
+		foreach ( wp_get_themes(
+			array(
+				'errors'  => false,
+				'allowed' => true,
+			)
+		) as $stylesheet => $theme ) {
+			$name = $theme->get( 'Name' );
+
+			if ( in_array( $name, $excluded_themes, true ) ) {
+				continue;
+			}
+
+			$themes[] = array(
+				'slug'         => sanitize_title( $stylesheet ),
+				'name'         => sanitize_text_field( $name ),
+				'version'      => sanitize_text_field( $theme->get( 'Version' ) ),
+				'active'       => $stylesheet === $current ? 'yes' : 'no',
+				'requires_php' => self::sanitize_php_version( $theme->get( 'RequiresPHP' ) ),
+			);
+		}
+
+		// Active theme first, then by name (as on the Themes screen).
+		usort(
+			$themes,
+			static function ( $a, $b ) {
+				if ( $a['active'] !== $b['active'] ) {
+					return 'yes' === $a['active'] ? -1 : 1;
+				}
+				return strnatcasecmp( $a['name'], $b['name'] );
+			}
 		);
 
 		/**
@@ -659,6 +673,11 @@ class PHP_Compatibility_Checker {
 	 * @return string Empty string if the status is unavailable.
 	 */
 	public function get_php_status_message() {
+		if ( ! function_exists( 'wp_check_php_version' ) && defined( 'ABSPATH' ) && file_exists( ABSPATH . 'wp-admin/includes/misc.php' ) ) {
+			// Not loaded outside wp-admin (WP-CLI, REST).
+			require_once ABSPATH . 'wp-admin/includes/misc.php';
+		}
+
 		if ( ! function_exists( 'wp_check_php_version' ) ) {
 			return '';
 		}

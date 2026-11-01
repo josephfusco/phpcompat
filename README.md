@@ -24,12 +24,38 @@ Nothing is scanned on the site's own server, so scans don't time out or use serv
 - **WordPress.org items only.** Premium, custom, and modified plugins or themes can't be checked, and are shown as "could not be scanned".
 - **Static analysis.** Code isn't executed. Code paths that exist for backwards compatibility can show up as failures, and runtime problems won't show up at all.
 
+## WP-CLI
+
+```bash
+wp php-compat scan                      # Every plugin and theme
+wp php-compat scan --active             # Active items only
+wp php-compat scan akismet --format=json
+wp php-compat report wp-optimize --php=7.3
+wp php-compat php-status
+```
+
+`scan` exits with status 1 when any item has problems, so it can gate deploys or run across many sites. Items Tide is still auditing are retried for up to `--wait` seconds (default 60). Results are cached, so repeat scans are fast.
+
+## Abilities API (AI agents)
+
+On WordPress 6.9+ the plugin registers two [abilities](https://developer.wordpress.org/apis/abilities/) in the `php-compatibility` category. Agents and other clients can discover and run them over REST (`/wp-abilities/v1/`) or through an MCP adapter:
+
+| Ability | What it returns |
+| --- | --- |
+| `php-compatibility-checker/scan` | Status per plugin and theme (`passes`, `problems`, `not_checked`, `pending`, `failed`), results per PHP version, and optional problem details. Input: `slugs`, `type`, `active_only`, `include_details`. |
+| `php-compatibility-checker/php-status` | The server's PHP version and whether WordPress considers it secure and at its recommended version. |
+
+Both are read-only and require an administrator (`manage_options`). The scan output includes `max_php_checked`, the newest PHP version with results, so an agent doesn't treat a pass as readiness for versions that weren't checked.
+
 ## Code map
 
 | Path | What it is |
 | --- | --- |
 | `plugin/wpengine-phpcompat.php` | Bootstrap: constants, autoloader, activation, upgrade, and migration hooks |
 | `plugin/lib/class-php-compatibility-checker.php` | Admin page, script loading, and the list of plugins and themes to scan, with filters |
+| `plugin/lib/class-scanner.php` | Server-side scanner: Tide requests, caching, and the result rules (used by WP-CLI and abilities) |
+| `plugin/lib/class-cli-command.php` | `wp php-compat` commands |
+| `plugin/lib/class-abilities.php` | Abilities API registration |
 | `plugin/lib/class-plugin-updater.php` | Serves updates from WP Engine's update server (since 1.6.4) |
 | `src/js/scan.js` | Page wiring: buttons and toggles |
 | `src/js/include/queue-manager.js` | Scan queue and Tide requests |
