@@ -3,44 +3,60 @@ import $ from "jquery";
 import { compareVersions } from "compare-versions";
 import { __, sprintf } from "@wordpress/i18n";
 
-export function initResults(itemsToScan, activeOnly) {
+export function initResults(itemsToScan, mode) {
   const container = $("#wpe_pcc_results");
   const template = $("#result-template").html().toString();
+  const choosing = "choose" === mode;
   container.empty();
 
-  if (itemsToScan.plugins.length) {
-    container.append("<h3>" + __("Plugins", "php-compatibility-checker") + "</h3>");
-    itemsToScan.plugins.forEach((plugin) => {
-      if ("yes" === plugin.active || "no" === activeOnly) {
-        const view = {
-          ...plugin,
-          type: "plugin",
-          status: "pending",
-        };
-
-        const output = Mustache.render(template, view);
-        container.append(output);
-      }
-    });
+  if (choosing) {
+    container.append(
+      `<p class="wpe-pcc-select-actions"><a href="#" data-select="all">${__(
+        "Select all",
+        "php-compatibility-checker"
+      )}</a> | <a href="#" data-select="none">${__(
+        "Select none",
+        "php-compatibility-checker"
+      )}</a></p>`
+    );
   }
 
-  if (itemsToScan.themes.length) {
-    container.append("<h3>" + __("Themes", "php-compatibility-checker") + "</h3>");
-    itemsToScan.themes.forEach((theme) => {
-      if ("yes" === theme.active || "no" === activeOnly) {
+  const groups = [
+    { items: itemsToScan.plugins, type: "plugin", heading: __("Plugins", "php-compatibility-checker") },
+    { items: itemsToScan.themes, type: "theme", heading: __("Themes", "php-compatibility-checker") },
+  ];
+
+  groups.forEach(({ items, type, heading }) => {
+    if (!items.length) {
+      return;
+    }
+
+    container.append("<h3>" + heading + "</h3>");
+    items.forEach((item) => {
+      if (choosing || "yes" === item.active || "no" === mode) {
         const view = {
-          ...theme,
-          type: "theme",
+          ...item,
+          type,
           status: "pending",
+          selectable: choosing,
+          checked: "yes" === item.active,
         };
 
-        const output = Mustache.render(template, view);
-        container.append(output);
+        container.append(Mustache.render(template, view));
       }
     });
-  }
+  });
 
   $(".wpe-pcc-results").show();
+}
+
+/**
+ * IDs ("type_slug") of the items checked in "choose" mode.
+ */
+export function getSelectedIds() {
+  return $(".wpe-pcc-select:checked")
+    .map((i, el) => el.value)
+    .get();
 }
 
 export function updateResult(response, job) {

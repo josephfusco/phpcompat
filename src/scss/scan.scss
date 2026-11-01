@@ -70,6 +70,10 @@ $color-border: #c3c4c7;
     color: #646970;
   }
 
+  &-select-actions {
+    margin: 0 15px 8px;
+  }
+
   &-results {
     textarea {
       @include textarea();

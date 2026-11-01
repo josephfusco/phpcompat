@@ -336,7 +336,8 @@ class PHP_Compatibility_Checker {
 								<td>
 									<fieldset>
 										<label><input type="radio" name="active_plugins" value="yes" checked="checked" /> <?php esc_html_e( 'Only scan active plugins and theme', 'php-compatibility-checker' ); ?></label><br>
-										<label><input type="radio" name="active_plugins" value="no" /> <?php esc_html_e( 'Scan all plugins and themes', 'php-compatibility-checker' ); ?></label>
+										<label><input type="radio" name="active_plugins" value="no" /> <?php esc_html_e( 'Scan all plugins and themes', 'php-compatibility-checker' ); ?></label><br>
+										<label><input type="radio" name="active_plugins" value="choose" /> <?php esc_html_e( 'Choose which plugins and themes to scan', 'php-compatibility-checker' ); ?></label>
 									</fieldset>
 								</td>
 							</tr>
@@ -456,7 +457,15 @@ class PHP_Compatibility_Checker {
 		<script id="result-template" type="text/x-handlebars-template">
 			<div id="{{type}}_{{slug}}" class="wpe-pcc-alert wpe-pcc-alert-{{status}}">
 				<p>
+					{{#selectable}}
+					<label>
+						<input type="checkbox" class="wpe-pcc-select" value="{{type}}_{{slug}}" {{#checked}}checked="checked"{{/checked}} />
+						<strong>{{name}} {{version}}</strong>
+					</label>
+					{{/selectable}}
+					{{^selectable}}
 					<strong>{{name}} {{version}}</strong>
+					{{/selectable}}
 				</p>
 
 				{{#php.length}}
