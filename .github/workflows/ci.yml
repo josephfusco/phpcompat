@@ -35,10 +35,10 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist
 
       - name: Lint (WordPress Coding Standards + PHPCompatibility 5.6+)
-        run: vendor/bin/phpcs --standard=./phpcs.xml
+        run: composer lint
 
       - name: Unit tests
-        run: vendor/bin/phpunit
+        run: composer test
 
   js:
     name: JS build
@@ -54,6 +54,12 @@ jobs:
       - name: Install npm dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Lint JavaScript
+        run: npm run lint:js
+
+      - name: Lint styles
+        run: npm run lint:css
+
       - name: Build
         run: npm run build
 
@@ -63,3 +69,37 @@ jobs:
         run: |
           grep -q "'wp-i18n'" plugin/build/scan.asset.php
           grep -q "'jquery'" plugin/build/scan.asset.php
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium --with-deps
+
+      - name: Start the test site (wp-env)
+        run: npm run wp-env:tests start
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: artifacts/
+          retention-days: 7

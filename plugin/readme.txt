@@ -41,7 +41,7 @@ To manually install:
 1. Upload the `php-compatibility-checker` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
 
-Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back within seconds. The scan runs in your browser, so keep the page open until it finishes.
+Go to `Tools => PHP Compatibility`, leave everything selected (or untick what you want to skip), and click `Scan`. Most results come back within seconds. The scan runs in your browser, so keep the page open until it finishes.
 
 == Frequently Asked Questions ==
 
@@ -51,7 +51,7 @@ Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back
 
 = 2. Are there WP-CLI commands available? =
 
-    As of the 1.6.0 release this plugin no longer includes the `phpcompat` WP-CLI command. If you still require use of that command, then please run version 1.5.2 or older of this plugin as those versions extend WP-CLI and provide commands.
+    Yes. Run `wp php-compat scan` to check every plugin and theme (add `--active` for active ones only, or `--format=json`). It exits with status 1 when problems are found, so it works in scripts and CI. `wp php-compat report <slug>` shows the details, and `wp php-compat php-status` shows the server's PHP status. Run `wp help php-compat` for all options.
 
 = 3. A plugin I created is listed as not compatible, what should I do? =
 
@@ -87,7 +87,13 @@ Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back
 == Changelog ==
 
 = Unreleased =
-- Add a "Choose which plugins and themes to scan" option to scan only selected items.
+- WP-CLI commands: `wp php-compat scan` (exits 1 when problems are found), `wp php-compat report <slug>`, and `wp php-compat php-status`.
+- Abilities API (WordPress 6.9+): `php-compatibility-checker/scan` and `php-compatibility-checker/php-status`, so AI agents and other clients can check PHP compatibility over REST or MCP. Both require an administrator.
+- Tide results are cached for server-side scans (a week for completed audits).
+- Simpler scan page: every plugin and theme is listed with a checkbox and selected by default, with Select all, Select none, and Active only shortcuts. This replaces the three scan options. Scans now include inactive plugins and themes unless you untick them. After a scan, "Start over" begins a new one.
+- Fix the `phpcompat_plugins_to_scan` filter not running when no plugins are left to scan (for example, when this is the only plugin installed).
+- Refresh the scan page for WordPress 7.2: core SVG icons (with Dashicons fallback on older versions), WordPress design tokens, a status label on each result, PHP versions as chips, a results summary, core buttons and notices, and a layout that stacks on narrow screens.
+- Accessibility: failing PHP versions are buttons with expanded/collapsed state, results don't rely on color alone, and closing a report returns focus to its version.
 - Respect each plugin's and theme's "Requires PHP": PHP versions below it are shown in gray as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.
 - Fix PHP 8.2 "Creation of dynamic property" deprecation notice.
 - Fix "Undefined array key" warnings when updating plugins from sources other than WordPress.org.

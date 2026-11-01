@@ -1,240 +1,409 @@
-$color-error: #d63638;
-$color-success: #00a32a;
-$color-skipped: #dba617;
-$color-unsupported: #8c8f94;
-$color-background: #fff;
-$color-border: #c3c4c7;
+// Colors and sizes come from WordPress design tokens (WordPress 7.0+).
+// Fallbacks for older versions are added at build time (postcss.config.js).
+$surface: var(--wpds-color-background-surface-neutral-strong);
+$surface-weak: var(--wpds-color-background-surface-neutral-weak);
+$stroke: var(--wpds-color-stroke-surface-neutral);
+$text: var(--wpds-color-foreground-content-neutral);
+$text-weak: var(--wpds-color-foreground-content-neutral-weak);
+$radius: var(--wpds-border-radius-md);
+$radius-pill: 999px;
+$focus: var(--wp-admin-theme-color, #3858e9);
 
-@mixin textarea {
-  width: 100%;
-  height: 30em;
-  max-height: 80vh;
-  font-size: 12px;
-  font-family: Consolas, Monaco, Lucida Console, Liberation Mono,
-    DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
+$success: var(--wpds-color-foreground-content-success-weak);
+$success-bg: var(--wpds-color-background-surface-success-weak);
+$error: var(--wpds-color-foreground-content-error-weak);
+$error-bg: var(--wpds-color-background-surface-error-weak);
+$warning: var(--wpds-color-foreground-content-warning-weak);
+$warning-bg: var(--wpds-color-background-surface-warning-weak);
+
+@mixin focus-ring {
+	outline: 2px solid $focus;
+	outline-offset: 1px;
+	box-shadow: none;
 }
 
 .wpe-pcc {
-  &-wrap {
-    .button-primary {
-      .dashicons,
-      .dashicons-before {
-        line-height: 1.4em;
-      }
-    }
-  }
-  &-alert {
-    background: $color-background;
-    border: 1px solid $color-border;
-    border-left-width: 4px;
-    box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
-    margin: 5px 15px 2px;
-    padding: 1px 12px;
-    position: relative;
+	// Layout: main column plus the optional WP Engine sidebar.
+	// Stacks on narrow screens.
+	&-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 32px;
 
-    .spinner {
-      position: absolute;
-      right: 0;
-      top: 10px;
-      visibility: visible;
-    }
+		&.wpe-pcc-has-aside {
 
-    &-error {
-      border-left-color: $color-error;
-    }
+			@media (min-width: 1100px) {
+				grid-template-columns: minmax(0, 1fr) 280px;
+			}
+		}
+	}
 
-    &-success {
-      border-left-color: $color-success;
-    }
+	// Icons: core SVGs (WordPress 7.1+) or Dashicons fallback.
+	&-icon {
+		flex: none;
+		width: 16px;
+		height: 16px;
+		fill: currentcolor;
+		vertical-align: middle;
 
-    &-skipped {
-      border-left-color: $color-skipped;
-    }
-  }
-  &-php-version {
-    &-passed {
-      color: $color-success;
-    }
+		&.dashicons {
+			font-size: 16px;
+			line-height: 1;
+		}
+	}
 
-    &-errors {
-      color: $color-error;
-      text-decoration: none;
-    }
+	&-button-with-icon {
+		display: inline-flex !important;
+		align-items: center;
+		gap: 6px;
+	}
 
-    &-unsupported {
-      color: $color-unsupported;
-    }
-  }
+	// Scan controls.
+	&-run-scan {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 12px;
+	}
 
-  &-unsupported-note {
-    color: #646970;
-  }
+	&-scan-information {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 
-  &-select-actions {
-    margin: 0 15px 8px;
-  }
+		.wpe-pcc-spinner {
+			float: none;
+			margin: 0;
+		}
+	}
 
-  &-results {
-    textarea {
-      @include textarea();
-    }
-  }
+	// Toolbar: scan button, progress, and selection shortcuts.
+	&-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-block: 8px 16px;
+	}
 
-  &-download-report {
-    clear: both;
-  }
+	&-select-actions {
+		display: flex;
+		gap: 16px;
+	}
 
-  &-developer-mode {
-    float: right;
-  }
+	&-tag {
+		margin-inline-start: 4px;
+		padding: 0 6px;
+		border-radius: $radius-pill;
+		background: $surface-weak;
+		color: $text-weak;
+		font-size: 12px;
+	}
 
-  &-clear-results {
-    border: 0 none;
-    color: #b4b9be;
-    background: none;
-    cursor: pointer;
-    line-height: 28px;
-    margin-left: 10px;
-  }
+	// Results header row.
+	&-download-report {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 12px;
+		margin-block: 12px 16px;
+	}
 
-  &-main,
-  &-aside {
-    display: table-cell;
-  }
+	&-clear-results.button-link {
+		color: $text-weak;
+	}
 
-  &-main {
-    padding-right: 40px;
-  }
+	&-developer-mode {
+		margin-inline-start: auto;
+	}
 
-  &-aside {
-    width: 277px;
+	// Summary line after a scan.
+	&-summary {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-block-end: 16px;
 
-    h2 {
-      line-height: 1.15em;
+		&:empty {
+			display: none;
+		}
 
-      &:first-child {
-        margin-top: 0;
-      }
-    }
+		&-item {
+			padding: 2px 10px;
+			border-radius: $radius-pill;
+			background: $surface-weak;
+			color: $text;
+			font-weight: 500;
+		}
 
-    &-content {
-      border: 1px solid #babec3;
-      padding: 20px;
-      margin-top: 20px;
-      margin-bottom: 20px;
+		&-success {
+			background: $success-bg;
+			color: $success;
+		}
 
-      p {
-        margin: 0;
-        padding: 0;
-      }
+		&-problems,
+		&-failed {
+			background: $error-bg;
+			color: $error;
+		}
 
-      p + p {
-        margin-top: 1em;
-      }
-    }
-  }
+		&-skipped {
+			background: $warning-bg;
+			color: $warning;
+		}
+	}
 
-  &-scan-information {
-    display: inline-block;
 
-    .wpe-pcc-spinner {
-      float: none;
-      margin: 4px 0 4px 10px;
-      padding: 0;
-    }
+	// Result cards.
+	&-alert {
+		position: relative;
+		margin-block-end: 8px;
+		padding: 12px 16px;
+		background: $surface;
+		border: 1px solid $stroke;
+		border-inline-start: 4px solid $stroke;
+		border-radius: $radius;
+		color: $text;
 
-    .wpe-progress-active {
-      margin-left: 10px;
-      line-height: 1.8;
-      display: inline-block;
-    }
-  }
+		p {
+			margin: 0;
+		}
 
-  &-logo {
-    display: block;
-    max-width: 182px;
-    text-align: center;
-    margin: 0 auto;
-  }
+		> * + * {
+			margin-block-start: 8px;
+		}
 
-  &-get-hosting {
-    background: #e8e9ea;
-  }
+		.spinner {
+			position: absolute;
+			inset-block-start: 10px;
+			inset-inline-end: 8px;
+			margin: 0;
+			visibility: visible;
+		}
 
-  &-button {
-    display: block;
-    padding: 15px;
-    margin-top: 20px;
-    margin-bottom: 20px;
-    text-transform: uppercase;
-    font-weight: bold;
-    font-size: 14px;
-    text-align: center;
-    background: #40bac8;
-    color: #fff;
-    text-decoration: none;
+		&-success {
+			border-inline-start-color: $success;
+		}
 
-    &:hover,
-    &:focus {
-      text-decoration: none;
-      cursor: pointer;
-      background: #3199a5;
-      color: #fff;
-    }
+		&-error {
+			border-inline-start-color: $error;
+		}
 
-    &-primary {
-      background: #eb6126;
+		&-skipped {
+			border-inline-start-color: $warning;
+		}
+	}
 
-      &:hover,
-      &:focus {
-        background: #bf4a18;
-      }
-    }
-  }
-}
+	&-card-header {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-height: 24px;
+	}
 
-.rtl {
-  direction: rtl;
-  unicode-bidi: embed;
+	&-card-title {
 
-  .wpe-pcc {
-    &-alert {
-      border-left-width: 1px;
-      border-right-width: 4px;
+		label {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+		}
 
-      .spinner {
-        left: 0;
-        right: auto;
-      }
+		input[type="checkbox"] {
+			margin: 0;
+		}
+	}
 
-      &-error {
-        border-left-color: $color-border;
-        border-right-color: $color-error;
-      }
+	&-card-version {
+		color: $text-weak;
+	}
 
-      &-success {
-        border-left-color: $color-border;
-        border-right-color: $color-success;
-      }
+	&-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 2px 8px;
+		border-radius: $radius-pill;
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 20px;
+		white-space: nowrap;
 
-      &-skipped {
-        border-left-color: $color-border;
-        border-right-color: $color-skipped;
-      }
-    }
+		&-success {
+			background: $success-bg;
+			color: $success;
+		}
 
-    &-developer-mode {
-      float: left;
-    }
+		&-error {
+			background: $error-bg;
+			color: $error;
+		}
 
-    &-clear-results {
-      margin-left: 0;
-      margin-right: 10px;
-    }
+		&-warning {
+			background: $warning-bg;
+			color: $warning;
+		}
+	}
 
-    &-main {
-      padding-left: 40px;
-      padding-right: 0;
-    }
-  }
+	// PHP version chips.
+	&-versions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+
+		li {
+			margin: 0;
+		}
+	}
+
+	&-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		min-height: 24px;
+		padding: 0 8px;
+		border: 1px solid transparent;
+		border-radius: $radius-pill;
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		line-height: 22px;
+
+		&-pass {
+			background: $success-bg;
+			color: $success;
+		}
+
+		&-fail {
+			background: $error-bg;
+			border-color: currentcolor;
+			color: $error;
+			cursor: pointer;
+			font: inherit;
+			font-size: 12px;
+
+			&:hover,
+			&[aria-expanded="true"] {
+				background: $error;
+				color: #fff;
+			}
+
+			&:focus-visible {
+
+				@include focus-ring;
+			}
+		}
+
+		&-unsupported {
+			background: $surface-weak;
+			color: $text-weak;
+			text-decoration: line-through;
+		}
+	}
+
+	&-hint {
+		color: $text-weak;
+	}
+
+	&-message {
+		color: $text;
+	}
+
+	// Problem details for one PHP version.
+	&-php-version-report {
+		margin-block-start: 8px;
+		border: 1px solid $stroke;
+		border-radius: $radius;
+		background: $surface-weak;
+	}
+
+	&-report-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 12px;
+		border-block-end: 1px solid $stroke;
+
+		h4 {
+			margin: 0;
+		}
+	}
+
+	&-php-version-report textarea,
+	.wpe-pcc-raw-report {
+		display: block;
+		width: 100%;
+		height: 30em;
+		max-height: 70vh;
+		padding: 12px;
+		border: 0;
+		border-radius: 0 0 $radius $radius;
+		background: $surface;
+		font-family: Menlo, Consolas, Monaco, "Liberation Mono", "Courier New", monospace;
+		font-size: 12px;
+		resize: vertical;
+	}
+
+	.wpe-pcc-raw-report {
+		border: 1px solid $stroke;
+		border-radius: $radius;
+	}
+
+	&-attention.notice {
+		margin: 16px 0 0;
+	}
+
+	&-footer {
+		margin-block-start: 24px;
+		color: $text-weak;
+
+		ul {
+			margin-block-start: 4px;
+		}
+	}
+
+	// WP Engine sidebar (only on WP Engine-hosted sites).
+	&-aside {
+
+		h2 {
+			margin-block: 0 12px;
+			font-size: 1.15em;
+			line-height: 1.3;
+		}
+
+		&-content {
+			margin-block-start: 16px;
+			padding: 16px;
+			background: $surface;
+			border: 1px solid $stroke;
+			border-radius: $radius;
+
+			p {
+				margin: 0;
+			}
+
+			p + p {
+				margin-block-start: 12px;
+			}
+		}
+
+		&-button.button {
+			display: block;
+			width: 100%;
+			margin-block: 16px 12px;
+			text-align: center;
+		}
+	}
+
+	&-logo {
+		display: block;
+		max-width: 182px;
+		margin-inline: auto;
+		text-align: center;
+	}
 }

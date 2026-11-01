@@ -35,6 +35,14 @@ function wpe_phpcompat_loader() {
 
 	// Add plugin action link.
 	add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $register_phpcompat, 'filter_plugin_links' ) );
+
+	// Abilities API (WordPress 6.9+): lets AI agents and other clients run scans.
+	Abilities::init();
+
+	// WP-CLI: wp php-compat scan|report|php-status.
+	if ( defined( 'WP_CLI' ) && WP_CLI ) {
+		\WP_CLI::add_command( 'php-compat', CLI_Command::class );
+	}
 }
 
 /**

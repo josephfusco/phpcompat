@@ -4,20 +4,18 @@
   "require-dev": {
     "phpunit/phpunit": "^12.5.22",
     "brain/monkey": "^2.6.0",
-    "composer/composer": "^2.9.8",
     "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
-    "wp-cli/wp-cli-bundle": "*",
-    "johnpbloch/wordpress": "*",
     "wp-coding-standards/wpcs": "^3.1",
     "phpcompatibility/phpcompatibility-wp": "^2.1"
   },
   "config": {
     "allow-plugins": {
-      "johnpbloch/wordpress-core-installer": true,
       "dealerdirect/phpcodesniffer-composer-installer": true
     }
   },
   "scripts": {
-    "makepot": "./vendor/bin/wp i18n make-pot plugin --slug=php-compatibility-checker"
+    "lint": "phpcs --standard=./phpcs.xml",
+    "lint:fix": "phpcbf --standard=./phpcs.xml",
+    "test": "phpunit"
   }
 }

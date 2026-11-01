@@ -8,13 +8,13 @@ This fork is actively maintained. It's where fixes are developed before being pr
 
 ## How it works
 
-The plugin adds **Tools → PHP Compatibility** to wp-admin. When you click **Scan site**:
+The plugin adds **Tools → PHP Compatibility** to wp-admin. It lists every plugin and theme, all selected. Untick anything you want to skip (or use **Active only**), then click **Scan**:
 
-1. The plugin lists the site's plugins and themes, with their WordPress.org slugs and installed versions.
+1. The plugin sends the selected plugins' and themes' WordPress.org slugs and installed versions to the browser.
 2. The browser asks the [Tide](https://wptide.org) API for each item's audit, one at a time:
    `https://wptide.org/api/v1/audit/wporg/{plugin|theme}/{slug}/{version}?reports=phpcs_phpcompatibilitywp`
 3. Tide has already run [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP) against that release from WordPress.org. If it hasn't, it queues the audit and the plugin retries every 5 seconds.
-4. The results page shows pass or fail per PHP version. Clicking a failing version shows the file, line, and message for each problem.
+4. Each item gets a status (Passes, Problems found, Not checked) and a chip per PHP version. Versions below the item's own "Requires PHP" are shown as not counted. Selecting a failing version shows the file, line, and message for each problem.
 
 Nothing is scanned on the site's own server, so scans don't time out or use server resources.
 
@@ -24,17 +24,45 @@ Nothing is scanned on the site's own server, so scans don't time out or use serv
 - **WordPress.org items only.** Premium, custom, and modified plugins or themes can't be checked, and are shown as "could not be scanned".
 - **Static analysis.** Code isn't executed. Code paths that exist for backwards compatibility can show up as failures, and runtime problems won't show up at all.
 
+## WP-CLI
+
+```bash
+wp php-compat scan                      # Every plugin and theme
+wp php-compat scan --active             # Active items only
+wp php-compat scan akismet --format=json
+wp php-compat report wp-optimize --php=7.3
+wp php-compat php-status
+```
+
+`scan` exits with status 1 when any item has problems, so it can gate deploys or run across many sites. Items Tide is still auditing are retried for up to `--wait` seconds (default 60). Results are cached, so repeat scans are fast.
+
+## Abilities API (AI agents)
+
+On WordPress 6.9+ the plugin registers two [abilities](https://developer.wordpress.org/apis/abilities/) in the `php-compatibility` category. Agents and other clients can discover and run them over REST (`/wp-abilities/v1/`) or through an MCP adapter:
+
+| Ability | What it returns |
+| --- | --- |
+| `php-compatibility-checker/scan` | Status per plugin and theme (`passes`, `problems`, `not_checked`, `pending`, `failed`), results per PHP version, and optional problem details. Input: `slugs`, `type`, `active_only`, `include_details`. |
+| `php-compatibility-checker/php-status` | The server's PHP version and whether WordPress considers it secure and at its recommended version. |
+
+Both are read-only and require an administrator (`manage_options`). The scan output includes `max_php_checked`, the newest PHP version with results, so an agent doesn't treat a pass as readiness for versions that weren't checked.
+
 ## Code map
 
 | Path | What it is |
 | --- | --- |
 | `plugin/wpengine-phpcompat.php` | Bootstrap: constants, autoloader, activation, upgrade, and migration hooks |
 | `plugin/lib/class-php-compatibility-checker.php` | Admin page, script loading, and the list of plugins and themes to scan, with filters |
+| `plugin/lib/class-scanner.php` | Server-side scanner: Tide requests, caching, and the result rules (used by WP-CLI and abilities) |
+| `plugin/lib/class-cli-command.php` | `wp php-compat` commands |
+| `plugin/lib/class-abilities.php` | Abilities API registration |
 | `plugin/lib/class-plugin-updater.php` | Serves updates from WP Engine's update server (since 1.6.4) |
 | `src/js/scan.js` | Page wiring: buttons and toggles |
 | `src/js/include/queue-manager.js` | Scan queue and Tide requests |
 | `src/js/include/render.js` | Results rendering (Mustache template in the PHP class) |
 | `plugin/build/` | Compiled assets (git-ignored; created by `npm run build`) |
+| `tests/*Test.php` | PHP unit tests (PHPUnit + Brain Monkey) |
+| `tests/e2e/` | Playwright end-to-end tests and the wp-env test fixture plugin |
 
 ### Filters
 
@@ -43,7 +71,7 @@ Nothing is scanned on the site's own server, so scans don't time out or use serv
 
 ## Local development
 
-Requirements: [Docker](https://www.docker.com/), Node.js 20 (`nvm use`), PHP 8.3+, and [Composer](https://getcomposer.org/).
+Requirements: [Docker](https://www.docker.com/), Node.js 24 (`nvm use`), PHP 8.3+, and [Composer](https://getcomposer.org/).
 
 ```bash
 npm ci
@@ -52,7 +80,7 @@ npm run build
 npx wp-env start
 ```
 
-WordPress runs at http://localhost:8888/wp-admin (user `admin`, password `password`), with the plugin mounted from `plugin/`. Go to **Tools → PHP Compatibility** and click **Scan site**.
+WordPress runs at http://localhost:8888/wp-admin (user `admin`, password `password`), with the plugin mounted from `plugin/`. Go to **Tools → PHP Compatibility** and click **Scan**.
 
 To have more to scan, install a few plugins:
 
@@ -65,13 +93,29 @@ npx wp-env run cli wp plugin install akismet contact-form-7 wordpress-seo --acti
 ## Tests and linting
 
 ```bash
-vendor/bin/phpunit                       # Unit tests (Brain Monkey)
-vendor/bin/phpcs --standard=./phpcs.xml  # WordPress Coding Standards + PHPCompatibility 5.6+
-vendor/bin/phpcbf --standard=./phpcs.xml # Auto-fix lint issues
-npm run build                            # Must compile without warnings
+composer test          # PHP unit tests
+composer lint          # WordPress Coding Standards + PHPCompatibility 5.6+
+composer lint:fix      # Auto-fix PHP lint issues
+npm run lint:js        # ESLint (WordPress config)
+npm run lint:css       # Stylelint (WordPress config, design token rules)
+npm run test:e2e       # Playwright end-to-end tests
+npm run test:e2e:debug # Same, with the Playwright inspector
 ```
 
+The end-to-end tests run against a separate wp-env site defined in `.wp-env.tests.json` (http://localhost:8889, started automatically), so your development site isn't touched. A small must-use plugin (`tests/e2e/fixtures/phpcompat-e2e.php`) is mapped into that site only. It supplies a fixed list of plugins and themes and a switch for the WP Engine sidebar, and the tests fake Tide's responses, so they're fast and don't depend on Tide being up. The [Tide watch workflow](.github/workflows/tide-watch.yml) covers the live service.
+
 CI runs all of these on every pull request. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+## Tooling
+
+The build and tests use WordPress's own maintained tooling, so there's little for this project to keep up to date:
+
+- [`@wordpress/scripts`](https://www.npmjs.com/package/@wordpress/scripts) for the build (webpack, Babel, Sass), ESLint, Stylelint, and Playwright config.
+- [`@wordpress/env`](https://www.npmjs.com/package/@wordpress/env) for local and test WordPress sites.
+- [`@wordpress/e2e-test-utils-playwright`](https://www.npmjs.com/package/@wordpress/e2e-test-utils-playwright) for end-to-end tests.
+- WordPress design tokens (`--wpds-*`), with fallbacks for older WordPress added at build time by `@wordpress/theme` (`postcss.config.js`).
+- Core SVG icons via `wp_get_icon()` (WordPress 7.1+), with Dashicons on older versions.
+- `jquery` and `wp-i18n` are loaded from WordPress, not bundled.
 
 ## Automation
 

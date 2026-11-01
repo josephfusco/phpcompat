@@ -115,4 +115,22 @@ class WpeSidebarTest extends TestCase {
 		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( null ) );
 		$this->assertSame( '', PHP_Compatibility_Checker::sanitize_php_version( false ) );
 	}
+
+	/**
+	 * The plugins filter must run even when no plugins are left to scan,
+	 * e.g. a site where this plugin is the only one installed.
+	 */
+	public function test_plugins_filter_runs_when_no_plugins_remain() {
+		Monkey\Functions\when( 'get_plugins' )->justReturn(
+			array( 'php-compatibility-checker/wpengine-phpcompat.php' => array( 'Name' => 'PHP Compatibility Checker' ) )
+		);
+		Monkey\Filters\expectApplied( 'phpcompat_plugins_to_scan' )
+			->once()
+			->with( array() )
+			->andReturn( array( array( 'slug' => 'added-by-filter' ) ) );
+
+		$plugins = ( new PHP_Compatibility_Checker() )->get_plugins_to_scan();
+
+		$this->assertSame( array( array( 'slug' => 'added-by-filter' ) ), $plugins );
+	}
 }
