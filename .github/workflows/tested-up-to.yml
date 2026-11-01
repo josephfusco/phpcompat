@@ -1,0 +1,61 @@
+name: Bump "Tested up to"
+
+# Weekly: if WordPress has a newer major.minor release than the readme's
+# "Tested up to", open a PR bumping it. A human merges after checking the
+# plugin on that release.
+
+on:
+  schedule:
+    - cron: '17 14 * * 1' # Mondays 14:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    if: github.repository == 'wpengine/phpcompat'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare readme with latest WordPress
+        id: check
+        run: |
+          latest=$(curl -fsS https://api.wordpress.org/core/version-check/1.7/ | jq -r '.offers[0].version' | cut -d. -f1,2)
+          current=$(sed -n 's/^Tested up to:[[:space:]]*//p' readme.txt | tr -d '[:space:]')
+          echo "latest=$latest current=$current"
+          if [ -z "$latest" ] || [ -z "$current" ]; then
+            echo "::error::Could not determine versions"; exit 1
+          fi
+          newest=$(printf '%s\n%s\n' "$latest" "$current" | sort -V | tail -1)
+          if [ "$newest" != "$current" ]; then
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+            echo "version=$latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update readmes
+        if: steps.check.outputs.bump == 'true'
+        run: |
+          for f in readme.txt plugin/readme.txt; do
+            sed -i -E "s/^(Tested up to:[[:space:]]*).*/\1${{ steps.check.outputs.version }}/" "$f"
+          done
+          git diff
+
+      # PRs opened with the default GITHUB_TOKEN don't trigger other workflows,
+      # so CI won't run on them. Set a BOT_TOKEN secret (GitHub App or
+      # fine-grained token with contents + pull-requests write) to fix that.
+      - name: Open pull request
+        if: steps.check.outputs.bump == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: bot/tested-up-to-${{ steps.check.outputs.version }}
+          commit-message: 'Bump "Tested up to" to WordPress ${{ steps.check.outputs.version }}'
+          title: 'Bump "Tested up to" to WordPress ${{ steps.check.outputs.version }}'
+          body: |
+            WordPress ${{ steps.check.outputs.version }} is out. This bumps "Tested up to" in both readmes.
+
+            Before merging, load the PHP Compatibility page on WordPress ${{ steps.check.outputs.version }} and run a scan.
+          labels: automated
