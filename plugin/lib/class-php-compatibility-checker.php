@@ -200,10 +200,11 @@ class PHP_Compatibility_Checker {
 		$plugins = array_map(
 			function ( $plugin ) {
 				return array(
-					'slug'    => sanitize_title( $plugin['slug'] ),
-					'name'    => sanitize_text_field( $plugin['Name'] ),
-					'version' => sanitize_text_field( $plugin['Version'] ),
-					'active'  => $plugin['active'],
+					'slug'         => sanitize_title( $plugin['slug'] ),
+					'name'         => sanitize_text_field( $plugin['Name'] ),
+					'version'      => sanitize_text_field( $plugin['Version'] ),
+					'active'       => $plugin['active'],
+					'requires_php' => self::sanitize_php_version( isset( $plugin['RequiresPHP'] ) ? $plugin['RequiresPHP'] : '' ),
 				);
 			},
 			$plugins
@@ -219,6 +220,7 @@ class PHP_Compatibility_Checker {
 		 *     @type string $name Plugin name.
 		 *     @type string $version Plugin version.
 		 *     @type string $active Whether the plugin is active (yes or no).
+		 *     @type string $requires_php Minimum PHP version from the plugin's "Requires PHP" header, or empty.
 		 * }
 		 *
 		 * @since 1.6.0
@@ -256,10 +258,11 @@ class PHP_Compatibility_Checker {
 		$themes = array_map(
 			function ( $theme ) {
 				return array(
-					'slug'    => sanitize_title( $theme['id'] ),
-					'name'    => sanitize_text_field( $theme['name'] ),
-					'version' => sanitize_text_field( $theme['version'] ),
-					'active'  => true === $theme['active'] ? 'yes' : 'no',
+					'slug'         => sanitize_title( $theme['id'] ),
+					'name'         => sanitize_text_field( $theme['name'] ),
+					'version'      => sanitize_text_field( $theme['version'] ),
+					'active'       => true === $theme['active'] ? 'yes' : 'no',
+					'requires_php' => self::sanitize_php_version( wp_get_theme( $theme['id'] )->get( 'RequiresPHP' ) ),
 				);
 			},
 			$themes_data
@@ -275,6 +278,7 @@ class PHP_Compatibility_Checker {
 		 *     @type string $name Theme name.
 		 *     @type string $version Theme version.
 		 *     @type string $active Whether the theme is active (yes or no).
+		 *     @type string $requires_php Minimum PHP version from the theme's "Requires PHP" header, or empty.
 		 * }
 		 *
 		 * @since 1.6.0
@@ -332,7 +336,8 @@ class PHP_Compatibility_Checker {
 								<td>
 									<fieldset>
 										<label><input type="radio" name="active_plugins" value="yes" checked="checked" /> <?php esc_html_e( 'Only scan active plugins and theme', 'php-compatibility-checker' ); ?></label><br>
-										<label><input type="radio" name="active_plugins" value="no" /> <?php esc_html_e( 'Scan all plugins and themes', 'php-compatibility-checker' ); ?></label>
+										<label><input type="radio" name="active_plugins" value="no" /> <?php esc_html_e( 'Scan all plugins and themes', 'php-compatibility-checker' ); ?></label><br>
+										<label><input type="radio" name="active_plugins" value="choose" /> <?php esc_html_e( 'Choose which plugins and themes to scan', 'php-compatibility-checker' ); ?></label>
 									</fieldset>
 								</td>
 							</tr>
@@ -452,23 +457,47 @@ class PHP_Compatibility_Checker {
 		<script id="result-template" type="text/x-handlebars-template">
 			<div id="{{type}}_{{slug}}" class="wpe-pcc-alert wpe-pcc-alert-{{status}}">
 				<p>
+					{{#selectable}}
+					<label>
+						<input type="checkbox" class="wpe-pcc-select" value="{{type}}_{{slug}}" {{#checked}}checked="checked"{{/checked}} />
+						<strong>{{name}} {{version}}</strong>
+					</label>
+					{{/selectable}}
+					{{^selectable}}
 					<strong>{{name}} {{version}}</strong>
+					{{/selectable}}
 				</p>
 
 				{{#php.length}}
 					<p class="wpe-pcc-results">
 						{{#php}}
+							{{#unsupported}}
+							<span class="wpe-pcc-php-version-unsupported dashicons-before dashicons-minus">{{phpversion}}</span>
+							{{/unsupported}}
+							{{^unsupported}}
 							{{#passed}}
 							<span class="wpe-pcc-php-version-passed dashicons-before dashicons-yes">{{phpversion}}</span>
 							{{/passed}}
 							{{^passed}}
 							<a href="#" data-php-version="{{phpversion}}" data-target="report_{{type}}_{{slug}}_{{phpversion}}" class="wpe-pcc-php-version-errors dashicons-before dashicons-no-alt">{{phpversion}}</a>
 							{{/passed}}
+							{{/unsupported}}
 						{{/php}}
 
 						{{#has_errors}}
 							<div><?php esc_html_e( 'Click on PHP Version to see errors and warnings', 'php-compatibility-checker' ); ?></div>
 						{{/has_errors}}
+						{{#has_unsupported}}
+							<div class="wpe-pcc-unsupported-note">
+								<?php
+								printf(
+									/* translators: %s: minimum PHP version, e.g. 7.4 */
+									esc_html__( 'Versions in gray are below its minimum of PHP %s, so they aren\'t counted.', 'php-compatibility-checker' ),
+									'{{requires_php}}'
+								);
+								?>
+							</div>
+						{{/has_unsupported}}
 					</p>
 				{{/php.length}}
 
@@ -505,6 +534,20 @@ class PHP_Compatibility_Checker {
 		</script>
 
 		<?php
+	}
+
+	/**
+	 * Normalize a "Requires PHP" header value.
+	 *
+	 * @since 1.6.5
+	 *
+	 * @param mixed $version Raw header value.
+	 * @return string Version like "7.4" or "8.0.2", or empty if missing or malformed.
+	 */
+	public static function sanitize_php_version( $version ) {
+		$version = is_string( $version ) ? trim( $version ) : '';
+
+		return preg_match( '/^\d+(\.\d+){0,2}$/', $version ) ? $version : '';
 	}
 
 	/**

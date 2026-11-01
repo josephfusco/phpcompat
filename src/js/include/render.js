@@ -1,46 +1,62 @@
 import Mustache from "mustache";
 import $ from "jquery";
 import { compareVersions } from "compare-versions";
-import { __ } from "@wordpress/i18n";
+import { __, sprintf } from "@wordpress/i18n";
 
-export function initResults(itemsToScan, activeOnly) {
+export function initResults(itemsToScan, mode) {
   const container = $("#wpe_pcc_results");
   const template = $("#result-template").html().toString();
+  const choosing = "choose" === mode;
   container.empty();
 
-  if (itemsToScan.plugins.length) {
-    container.append("<h3>" + __("Plugins", "php-compatibility-checker") + "</h3>");
-    itemsToScan.plugins.forEach((plugin) => {
-      if ("yes" === plugin.active || "no" === activeOnly) {
-        const view = {
-          ...plugin,
-          type: "plugin",
-          status: "pending",
-        };
-
-        const output = Mustache.render(template, view);
-        container.append(output);
-      }
-    });
+  if (choosing) {
+    container.append(
+      `<p class="wpe-pcc-select-actions"><a href="#" data-select="all">${__(
+        "Select all",
+        "php-compatibility-checker"
+      )}</a> | <a href="#" data-select="none">${__(
+        "Select none",
+        "php-compatibility-checker"
+      )}</a></p>`
+    );
   }
 
-  if (itemsToScan.themes.length) {
-    container.append("<h3>" + __("Themes", "php-compatibility-checker") + "</h3>");
-    itemsToScan.themes.forEach((theme) => {
-      if ("yes" === theme.active || "no" === activeOnly) {
+  const groups = [
+    { items: itemsToScan.plugins, type: "plugin", heading: __("Plugins", "php-compatibility-checker") },
+    { items: itemsToScan.themes, type: "theme", heading: __("Themes", "php-compatibility-checker") },
+  ];
+
+  groups.forEach(({ items, type, heading }) => {
+    if (!items.length) {
+      return;
+    }
+
+    container.append("<h3>" + heading + "</h3>");
+    items.forEach((item) => {
+      if (choosing || "yes" === item.active || "no" === mode) {
         const view = {
-          ...theme,
-          type: "theme",
+          ...item,
+          type,
           status: "pending",
+          selectable: choosing,
+          checked: "yes" === item.active,
         };
 
-        const output = Mustache.render(template, view);
-        container.append(output);
+        container.append(Mustache.render(template, view));
       }
     });
-  }
+  });
 
   $(".wpe-pcc-results").show();
+}
+
+/**
+ * IDs ("type_slug") of the items checked in "choose" mode.
+ */
+export function getSelectedIds() {
+  return $(".wpe-pcc-select:checked")
+    .map((i, el) => el.value)
+    .get();
 }
 
 export function updateResult(response, job) {
@@ -66,20 +82,64 @@ export function updateResult(response, job) {
     ...job,
   };
 
-  // Success if no errors.
-  view.status =
-    report.totals.errors === 0 && report.totals.warnings === 0
-      ? "success"
-      : "error";
-
   // Create index for PHP Versions.
   const phpVersions = Object.keys(report.versions).sort(compareVersions);
   let rawReport = `${job.name} ${job.version}\n\n`;
+
+  // Versions below the item's own "Requires PHP" can never run it, so problems
+  // there aren't real incompatibilities. Show them as "not counted" instead.
+  const requiresPhp = job.requires_php || "";
+  const isUnsupported = (phpVersion) =>
+    "" !== requiresPhp && compareVersions(phpVersion, requiresPhp) < 0;
+
+  const hasProblems = phpVersions.some((phpVersion) => {
+    if (isUnsupported(phpVersion)) {
+      return false;
+    }
+    const totals = report.versions[phpVersion]?.totals || {};
+    return (
+      report.incompatible.includes(phpVersion) ||
+      totals.errors > 0 ||
+      totals.warnings > 0
+    );
+  });
+
+  // If every reported version is below the minimum, nothing it can run on was
+  // checked (e.g. it requires PHP 8.3 but results stop at 8.0). Don't show that
+  // as a pass.
+  if (phpVersions.length && phpVersions.every(isUnsupported)) {
+    updateResultFailure(
+      {
+        status: "skipped",
+        message: sprintf(
+          /* translators: 1: plugin or theme name, 2: minimum PHP version, 3: newest PHP version with results. */
+          __(
+            "%1$s was not checked. It requires PHP %2$s or newer, and results only go up to PHP %3$s.",
+            "php-compatibility-checker"
+          ),
+          job.name,
+          requiresPhp,
+          phpVersions[phpVersions.length - 1]
+        ),
+      },
+      job
+    );
+    return;
+  }
+
+  view.status = hasProblems ? "error" : "success";
+  view.has_unsupported = phpVersions.some(isUnsupported);
 
   view.php = [];
   view.reports = [];
 
   phpVersions.forEach((phpVersion) => {
+    if (isUnsupported(phpVersion)) {
+      view.php.push({ phpversion: phpVersion, unsupported: true });
+      rawReport += `PHP ${phpVersion}: not counted (requires PHP ${requiresPhp})\n`;
+      return;
+    }
+
     view.php.push({
       phpversion: phpVersion,
       passed: report.compatible.includes(phpVersion),
@@ -122,9 +182,7 @@ export function updateResult(response, job) {
     }
   });
 
-  view.has_errors = !(
-    report.totals.errors === 0 && report.totals.warnings === 0
-  );
+  view.has_errors = hasProblems;
 
   const output = Mustache.render(template, view);
 

@@ -1,6 +1,7 @@
 $color-error: #d63638;
 $color-success: #00a32a;
 $color-skipped: #dba617;
+$color-unsupported: #8c8f94;
 $color-background: #fff;
 $color-border: #c3c4c7;
 
@@ -59,6 +60,18 @@ $color-border: #c3c4c7;
       color: $color-error;
       text-decoration: none;
     }
+
+    &-unsupported {
+      color: $color-unsupported;
+    }
+  }
+
+  &-unsupported-note {
+    color: #646970;
+  }
+
+  &-select-actions {
+    margin: 0 15px 8px;
   }
 
   &-results {

@@ -6,7 +6,7 @@ import { __, sprintf } from "@wordpress/i18n";
 const progress = $(".wpe-progress-active");
 const progressCount = $(".wpe-pcc-progress-count");
 
-export function initQueue(itemsToScan, activeOnly) {
+export function initQueue(itemsToScan, mode) {
   // Reset the queue.
   window.phpcompat.queue = [];
   window.phpcompat.results = [];
@@ -24,7 +24,7 @@ export function initQueue(itemsToScan, activeOnly) {
   $("#testResults").val("");
 
   itemsToScan.plugins.forEach((plugin) => {
-    if ("yes" === plugin.active || "no" === activeOnly) {
+    if ("yes" === plugin.active || "no" === mode || "choose" === mode) {
       window.phpcompat.queue.push({
         ...plugin,
         type: "plugin",
@@ -33,7 +33,7 @@ export function initQueue(itemsToScan, activeOnly) {
   });
 
   itemsToScan.themes.forEach((theme) => {
-    if ("yes" === theme.active || "no" === activeOnly) {
+    if ("yes" === theme.active || "no" === mode || "choose" === mode) {
       window.phpcompat.queue.push({
         ...theme,
         type: "theme",
@@ -41,6 +41,16 @@ export function initQueue(itemsToScan, activeOnly) {
     }
   });
 
+  window.phpcompat.total = window.phpcompat.queue.length;
+}
+
+/**
+ * Limit the queue to the given "type_slug" IDs (used in "choose" mode).
+ */
+export function limitQueue(ids) {
+  window.phpcompat.queue = window.phpcompat.queue.filter((job) =>
+    ids.includes(`${job.type}_${job.slug}`)
+  );
   window.phpcompat.total = window.phpcompat.queue.length;
 }
 

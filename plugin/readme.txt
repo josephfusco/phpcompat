@@ -87,6 +87,8 @@ Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back
 == Changelog ==
 
 = Unreleased =
+- Add a "Choose which plugins and themes to scan" option to scan only selected items.
+- Respect each plugin's and theme's "Requires PHP": PHP versions below it are shown in gray as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.
 - Fix PHP 8.2 "Creation of dynamic property" deprecation notice.
 - Fix "Undefined array key" warnings when updating plugins from sources other than WordPress.org.
 - Fix translations not loading: use the WordPress.org text domain (php-compatibility-checker) and stop calling load_plugin_textdomain() too early (WordPress 6.7 notice).

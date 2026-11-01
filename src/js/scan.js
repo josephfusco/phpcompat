@@ -1,7 +1,7 @@
 import "../scss/scan.scss";
 import jQuery from "jquery";
-import { initQueue, runNextJob } from "./include/queue-manager";
-import { initResults } from "./include/render";
+import { initQueue, runNextJob, limitQueue } from "./include/queue-manager";
+import { initResults, getSelectedIds } from "./include/render";
 import { downloadReport } from "./include/download";
 
 (function ($) {
@@ -25,6 +25,7 @@ import { downloadReport } from "./include/download";
   activeOnlySwitch.on("change", function () {
     init(checkerList);
     runButton.prop("disabled", false);
+    updateRunButton();
     disableDeveloperMode();
   });
 
@@ -33,13 +34,41 @@ import { downloadReport } from "./include/download";
     runButton.prop("disabled", false);
     disableDeveloperMode();
     init(checkerList);
+    updateRunButton();
   });
 
   runButton.on("click", function (event) {
     event.preventDefault();
+
+    if ("choose" === currentMode()) {
+      const ids = getSelectedIds();
+      if (!ids.length) {
+        return;
+      }
+      limitQueue(ids);
+
+      // Drop unselected items from the list and lock the selection.
+      $(".wpe-pcc-select").not(":checked").closest(".wpe-pcc-alert").remove();
+      $(".wpe-pcc-select").prop("disabled", true);
+      $(".wpe-pcc-select-actions").remove();
+      $("#wpe_pcc_results h3").each(function () {
+        if (!$(this).nextUntil("h3", ".wpe-pcc-alert").length) {
+          $(this).remove();
+        }
+      });
+    }
+
     runNextJob();
     $(".wpe-pcc-spinner").show();
     $(this).prop("disabled", true);
+  });
+
+  $(document).on("change", ".wpe-pcc-select", updateRunButton);
+
+  $(document).on("click", ".wpe-pcc-select-actions a", function (event) {
+    event.preventDefault();
+    $(".wpe-pcc-select").prop("checked", "all" === $(this).data("select"));
+    updateRunButton();
   });
 
   $(document).on("click", ".wpe-pcc-php-version-errors", function (event) {
@@ -75,10 +104,21 @@ import { downloadReport } from "./include/download";
     downloadReport();
   });
 
+  function currentMode() {
+    return $("input[type=radio][name=active_plugins]:checked").val();
+  }
+
   function init(itemsToScan) {
-    var activeOnly = $("input[type=radio][name=active_plugins]:checked").val();
-    initQueue(itemsToScan, activeOnly);
-    initResults(itemsToScan, activeOnly);
+    const mode = currentMode();
+    initQueue(itemsToScan, mode);
+    initResults(itemsToScan, mode);
+  }
+
+  // In "choose" mode, only allow scanning when something is selected.
+  function updateRunButton() {
+    if ("choose" === currentMode()) {
+      runButton.prop("disabled", !getSelectedIds().length);
+    }
   }
 
   function disableDeveloperMode() {
