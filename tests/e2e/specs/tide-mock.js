@@ -1,17 +1,18 @@
 /**
- * Fake Tide API responses, so tests don't depend on the live service.
+ * Fake Tide API responses in the browser, so tests don't depend on the live
+ * service. The same fixture data is served to server-side requests by the
+ * e2e fixture plugin.
  */
-
-const VERSIONS = [ '5.6', '7.0', '7.1', '7.2', '7.3', '7.4', '8.0' ];
+const fixtures = require( '../fixtures/tide-fixtures.json' );
 
 /**
  * Build a Tide audit response.
  *
  * @param {string[]} failing PHP versions with problems.
  */
-function audit( failing = [] ) {
+function audit( failing ) {
 	const versions = {};
-	VERSIONS.forEach( ( version ) => {
+	fixtures.versions.forEach( ( version ) => {
 		const fails = failing.includes( version );
 		versions[ version ] = {
 			totals: { errors: fails ? 1 : 0, warnings: 0, fixable: 0 },
@@ -42,7 +43,7 @@ function audit( failing = [] ) {
 		reports: {
 			phpcs_phpcompatibilitywp: {
 				report: {
-					compatible: VERSIONS.filter(
+					compatible: fixtures.versions.filter(
 						( v ) => ! failing.includes( v )
 					),
 					incompatible: failing,
@@ -54,24 +55,6 @@ function audit( failing = [] ) {
 	};
 }
 
-const RESPONSES = {
-	'passing-plugin': { status: 200, body: audit() },
-	// Requires 7.2, so 7.0 is "not counted" and 7.2/7.3 are real problems.
-	'problem-plugin': { status: 200, body: audit( [ '7.0', '7.2', '7.3' ] ) },
-	// Requires 8.3: every reported version is below the minimum.
-	'new-php-plugin': {
-		status: 200,
-		body: audit( [ '5.6', '7.0', '7.1', '7.2', '7.3' ] ),
-	},
-	// Not on WordPress.org.
-	'custom-plugin': {
-		status: 404,
-		body: { message: 'The audit requested does not exist.', status: 404 },
-	},
-	'inactive-plugin': { status: 200, body: audit() },
-	'passing-theme': { status: 200, body: audit() },
-};
-
 /**
  * Route Tide requests to the fake responses. Returns the list of requested slugs.
  *
@@ -82,21 +65,25 @@ async function mockTide( page ) {
 
 	await page.route( 'https://wptide.org/api/v1/audit/**', ( route ) => {
 		// Path: /api/v1/audit/wporg/{type}/{slug}/{version}
-		const itemSlug = new URL( route.request().url() ).pathname.split(
+		const slug = new URL( route.request().url() ).pathname.split(
 			'/'
 		)[ 6 ];
-		requested.push( itemSlug );
+		requested.push( slug );
 
-		const response = RESPONSES[ itemSlug ] || {
-			status: 404,
-			body: { message: 'Unknown fixture', status: 404 },
-		};
+		const fixture = fixtures.items[ slug ] || { status: 404 };
+		const body =
+			200 === fixture.status
+				? audit( fixture.failing )
+				: {
+						message: 'The audit requested does not exist.',
+						status: 404,
+					};
 
 		return route.fulfill( {
-			status: response.status,
+			status: fixture.status,
 			contentType: 'application/json',
 			headers: { 'Access-Control-Allow-Origin': '*' },
-			body: JSON.stringify( response.body ),
+			body: JSON.stringify( body ),
 		} );
 	} );
 

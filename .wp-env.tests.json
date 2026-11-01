@@ -1,9 +1,12 @@
 {
-	"plugins": [ "./plugin" ],
+	"plugins": [
+		"./plugin"
+	],
 	"port": 8889,
 	"testsEnvironment": false,
 	"testsPort": 8989,
 	"mappings": {
-		"wp-content/mu-plugins/phpcompat-e2e.php": "./tests/e2e/fixtures/phpcompat-e2e.php"
+		"wp-content/mu-plugins/phpcompat-e2e.php": "./tests/e2e/fixtures/phpcompat-e2e.php",
+		"wp-content/mu-plugins/phpcompat-e2e-tide.json": "./tests/e2e/fixtures/tide-fixtures.json"
 	}
 }
