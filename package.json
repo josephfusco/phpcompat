@@ -15,7 +15,8 @@
 		"lint:js": "wp-scripts lint-js src tests/e2e eslint.config.js postcss.config.js playwright.config.js",
 		"lint:css": "wp-scripts lint-style 'src/**/*.scss'",
 		"test:e2e": "wp-scripts test-playwright",
-		"test:e2e:debug": "wp-scripts test-playwright --debug"
+		"test:e2e:debug": "wp-scripts test-playwright --debug",
+		"wp-env:tests": "wp-env --config=.wp-env.tests.json"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.64.1",

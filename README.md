@@ -76,7 +76,7 @@ npm run test:e2e       # Playwright end-to-end tests
 npm run test:e2e:debug # Same, with the Playwright inspector
 ```
 
-The end-to-end tests run against wp-env's tests site (http://localhost:8889), so your development site isn't touched. A small must-use plugin (`tests/e2e/fixtures/phpcompat-e2e.php`) is mapped into that site only. It supplies a fixed list of plugins and themes and a switch for the WP Engine sidebar, and the tests fake Tide's responses, so they're fast and don't depend on Tide being up. The [Tide watch workflow](.github/workflows/tide-watch.yml) covers the live service.
+The end-to-end tests run against a separate wp-env site defined in `.wp-env.tests.json` (http://localhost:8889, started automatically), so your development site isn't touched. A small must-use plugin (`tests/e2e/fixtures/phpcompat-e2e.php`) is mapped into that site only. It supplies a fixed list of plugins and themes and a switch for the WP Engine sidebar, and the tests fake Tide's responses, so they're fast and don't depend on Tide being up. The [Tide watch workflow](.github/workflows/tide-watch.yml) covers the live service.
 
 CI runs all of these on every pull request. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 

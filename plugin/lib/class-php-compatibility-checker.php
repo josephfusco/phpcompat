@@ -161,7 +161,8 @@ class PHP_Compatibility_Checker {
 		);
 
 		if ( empty( $plugins ) ) {
-			return array();
+			/** This filter is documented below. */
+			return apply_filters( 'phpcompat_plugins_to_scan', array() );
 		}
 
 		$active_plugins = get_option( 'active_plugins' );
@@ -355,7 +356,7 @@ class PHP_Compatibility_Checker {
 
 					<div id="wpe-pcc-download-report" class="wpe-pcc-download-report" style="display:none;">
 						<button type="button" id="downloadReport" class="button wpe-pcc-button-with-icon"><?php $this->the_icon( 'download', 'download' ); ?> <?php esc_html_e( 'Download report', 'php-compatibility-checker' ); ?></button>
-						<button type="button" class="button-link wpe-pcc-clear-results" id="cleanupButton"><?php esc_html_e( 'Clear results', 'php-compatibility-checker' ); ?></button>
+						<button type="button" class="button-link wpe-pcc-clear-results" id="cleanupButton"><?php esc_html_e( 'Start over', 'php-compatibility-checker' ); ?></button>
 						<label class="wpe-pcc-developer-mode">
 							<input type="checkbox" id="developermode" name="developermode" value="yes" />
 							<?php esc_html_e( 'View results as raw text', 'php-compatibility-checker' ); ?>

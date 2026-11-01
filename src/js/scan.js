@@ -1,7 +1,7 @@
 /* global checkerList */
 import '../scss/scan.scss';
 import jQuery from 'jquery';
-import { _n, sprintf } from '@wordpress/i18n';
+import { __, _n, sprintf } from '@wordpress/i18n';
 import { initQueue, runNextJob, limitQueue } from './include/queue-manager';
 import { initResults, getSelectedIds } from './include/render';
 import { downloadReport } from './include/download';
@@ -54,7 +54,9 @@ import { downloadReport } from './include/download';
 
 		runNextJob();
 		$( '.wpe-pcc-spinner' ).show();
-		runButton.prop( 'disabled', true );
+		runButton
+			.prop( 'disabled', true )
+			.val( __( 'Scanning…', 'php-compatibility-checker' ) );
 	} );
 
 	$( document ).on( 'change', '.wpe-pcc-select', updateRunButton );
@@ -133,6 +135,7 @@ import { downloadReport } from './include/download';
 	function init() {
 		initQueue( checkerList );
 		initResults( checkerList );
+		$( '.wpe-pcc-toolbar' ).show();
 		updateRunButton();
 	}
 

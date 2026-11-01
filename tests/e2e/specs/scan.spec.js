@@ -140,8 +140,11 @@ test.describe( 'PHP Compatibility scan', () => {
 		expect( requested ).toEqual( [ 'inactive-plugin' ] );
 		await expect( page.locator( '.wpe-pcc-alert' ) ).toHaveCount( 1 );
 
-		// Clear results returns to the full, selected list.
-		await page.getByRole( 'button', { name: 'Clear results' } ).click();
+		// After a scan, the scan controls make way for "Start over", which
+		// returns to the full, selected list.
+		await expect( scanButton( page ) ).toBeHidden();
+		await page.getByRole( 'button', { name: 'Start over' } ).click();
+		await expect( scanButton( page ) ).toHaveValue( 'Scan 6 items' );
 		await expect( page.locator( '.wpe-pcc-select:checked' ) ).toHaveCount(
 			6
 		);

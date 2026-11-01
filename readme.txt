@@ -87,7 +87,8 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 == Changelog ==
 
 = Unreleased =
-- Simpler scan page: every plugin and theme is listed with a checkbox and selected by default, with Select all, Select none, and Active only shortcuts. This replaces the three scan options. Scans now include inactive plugins and themes unless you untick them.
+- Simpler scan page: every plugin and theme is listed with a checkbox and selected by default, with Select all, Select none, and Active only shortcuts. This replaces the three scan options. Scans now include inactive plugins and themes unless you untick them. After a scan, "Start over" begins a new one.
+- Fix the `phpcompat_plugins_to_scan` filter not running when no plugins are left to scan (for example, when this is the only plugin installed).
 - Refresh the scan page for WordPress 7.2: core SVG icons (with Dashicons fallback on older versions), WordPress design tokens, a status label on each result, PHP versions as chips, a results summary, core buttons and notices, and a layout that stacks on narrow screens.
 - Accessibility: failing PHP versions are buttons with expanded/collapsed state, results don't rely on color alone, and closing a report returns focus to its version.
 - Respect each plugin's and theme's "Requires PHP": PHP versions below it are shown in gray as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.

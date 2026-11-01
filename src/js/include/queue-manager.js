@@ -144,6 +144,9 @@ export function runNextJob() {
 		showDownload();
 		renderSummary();
 
+		// The scan is done: "Start over" begins a new one.
+		$( '.wpe-pcc-toolbar' ).hide();
+
 		// Only offer help when something actually failed.
 		if ( $( '[data-result="problems"]' ).length ) {
 			$( '.wpe-pcc-information' ).show();
