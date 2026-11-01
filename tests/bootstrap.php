@@ -6,6 +6,9 @@ require_once dirname( dirname( __FILE__ ) ) . '/vendor/autoload.php';
 Monkey\setUp();
 
 // WordPress time constants used by the scanner.
+if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
+	define( 'HOUR_IN_SECONDS', 3600 );
+}
 if ( ! defined( 'DAY_IN_SECONDS' ) ) {
 	define( 'DAY_IN_SECONDS', 86400 );
 }

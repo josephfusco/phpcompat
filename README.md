@@ -43,9 +43,20 @@ On WordPress 6.9+ the plugin registers two [abilities](https://developer.wordpre
 | Ability | What it returns |
 | --- | --- |
 | `php-compatibility-checker/scan` | Status per plugin and theme (`passes`, `problems`, `not_checked`, `pending`, `failed`), results per PHP version, and optional problem details. Input: `slugs`, `type`, `active_only`, `include_details`. |
-| `php-compatibility-checker/php-status` | The server's PHP version and whether WordPress considers it secure and at its recommended version. |
+| `php-compatibility-checker/php-status` | The server's PHP version, whether WordPress considers it secure and at its recommended version, and `release`: whether it's the latest release of a supported branch (from php.net). `release.state` is `up_to_date`, `update_available`, `unsupported_branch`, `vendor_build`, or `unknown`. |
 
 Both are read-only and require an administrator (`manage_options`). The scan output includes `max_php_checked`, the newest PHP version with results, so an agent doesn't treat a pass as readiness for versions that weren't checked.
+
+## Server PHP release status
+
+Static compatibility results don't tell you whether the server's PHP itself is patched. WordPress's own PHP check works at the branch level (it treats any 8.3 release as secure). The plugin also compares the exact version with php.net's release data ([`releases/states.php`](https://www.php.net/releases/states.php) and [`releases/active.php`](https://www.php.net/releases/active.php), cached for 12 hours):
+
+- **update_available:** a newer patch release exists (flagged when it's a security release, as with the October 2026 PHP2Shell fixes).
+- **unsupported_branch:** the branch no longer gets security fixes (e.g. 7.4, 8.1).
+- **vendor_build:** a host or Linux distribution build (e.g. `8.3.6-0ubuntu…`) that may include backported fixes, so it isn't reported as outdated.
+- **up_to_date** or **unknown** (php.net unreachable).
+
+The scan page shows a notice for the first three. The same data is in `wp php-compat php-status` and the `php-status` ability, so hosts can check a whole fleet.
 
 ## Code map
 
@@ -56,6 +67,7 @@ Both are read-only and require an administrator (`manage_options`). The scan out
 | `plugin/lib/class-scanner.php` | Server-side scanner: Tide requests, caching, and the result rules (used by WP-CLI and abilities) |
 | `plugin/lib/class-cli-command.php` | `wp php-compat` commands |
 | `plugin/lib/class-abilities.php` | Abilities API registration |
+| `plugin/lib/class-php-releases.php` | Server PHP release status from php.net (latest patch release, branch end of life) |
 | `plugin/lib/class-plugin-updater.php` | Serves updates from WP Engine's update server (since 1.6.4) |
 | `src/js/scan.js` | Page wiring: buttons and toggles |
 | `src/js/include/queue-manager.js` | Scan queue and Tide requests |

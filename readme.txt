@@ -79,6 +79,15 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 
     To disclose security issues for this plugin please email WordPress@wpengine.com.
 
+= 8. Does it check whether my server's PHP is secure? =
+
+    It checks whether the server runs the latest release of a PHP branch that still gets security fixes, using php.net's release data, and shows a notice on the scan page if not. It can't confirm builds from your host or Linux distribution, which often include security fixes under an older-looking version number, so for those it points you to your host's security notices. It can't patch PHP for you; ask your host to update.
+
+= 9. What external services does this plugin use? =
+
+    * [Tide](https://wptide.org) (wptide.org): scan results. The slug and version of each plugin and theme you scan are sent to Tide's API, from your browser on the scan page, or from your server for WP-CLI and Abilities API scans. See the [Tide project](https://github.com/wptide) for its terms and privacy information.
+    * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
+
 == Screenshots ==
 
 1. Main screen: compatibility checker options
@@ -87,6 +96,7 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 == Changelog ==
 
 = Unreleased =
+- Check whether the server's PHP is the latest release of a supported branch, using php.net's release data. The scan page shows a notice when a newer (security) release is available, when the branch no longer gets security fixes, or when the server runs a host or distribution build to verify. Also in `wp php-compat php-status` and the `php-status` ability.
 - WP-CLI commands: `wp php-compat scan` (exits 1 when problems are found), `wp php-compat report <slug>`, and `wp php-compat php-status`.
 - Abilities API (WordPress 6.9+): `php-compatibility-checker/scan` and `php-compatibility-checker/php-status`, so AI agents and other clients can check PHP compatibility over REST or MCP. Both require an administrator.
 - Tide results are cached for server-side scans (a week for completed audits).

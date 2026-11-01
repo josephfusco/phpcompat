@@ -228,6 +228,14 @@ class CLI_Command {
 		$format = Utils\get_flag_value( $assoc_args, 'format', 'table' );
 
 		if ( 'table' === $format ) {
+			$release = $status['release'];
+			unset( $status['release'] );
+			$status['release_state']        = $release['state'];
+			$status['latest_release']       = $release['latest'];
+			$status['latest_is_security']   = $release['latest_is_security'];
+			$status['security_support_end'] = $release['security_support_end'];
+			$status['release_message']      = $release['message'];
+
 			$rows = array();
 			foreach ( $status as $key => $value ) {
 				$rows[] = array(

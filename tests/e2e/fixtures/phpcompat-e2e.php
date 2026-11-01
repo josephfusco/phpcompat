@@ -127,3 +127,45 @@ add_filter(
 	10,
 	3
 );
+
+// Fake php.net release data: a newer security release exists for this server's branch.
+add_filter(
+	'pre_http_request',
+	static function ( $preempt, $args, $url ) {
+		$major  = (string) PHP_MAJOR_VERSION;
+		$branch = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+
+		if ( 'https://www.php.net/releases/states.php' === $url ) {
+			$body = array(
+				$major => array(
+					$branch => array(
+						'state'                => 'security',
+						'security_support_end' => '2099-12-31T00:00:00+00:00',
+					),
+				),
+			);
+		} elseif ( 'https://www.php.net/releases/active.php' === $url ) {
+			$body = array(
+				$major => array(
+					$branch => array(
+						'version' => $branch . '.999',
+						'date'    => '01 Jan 2099',
+						'tags'    => array( 'security' ),
+					),
+				),
+			);
+		} else {
+			return $preempt;
+		}
+
+		return array(
+			'headers'  => array(),
+			'body'     => wp_json_encode( $body ),
+			'response' => array( 'code' => 200, 'message' => 'OK' ),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	},
+	10,
+	3
+);
