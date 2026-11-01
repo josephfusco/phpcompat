@@ -11,8 +11,7 @@
  * Update URI:        false
  * License:           GPLv2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:       wpe-php-compat
- * Domain Path:       /languages
+ * Text Domain:       php-compatibility-checker
  *
  * @package WPEngine_PHPCompat\PHP_Compatibility_Checker
  */
@@ -21,6 +20,7 @@ namespace WPEngine_PHPCompat;
 
 define( 'WPEPHPCOMPAT_ADMIN_PAGE_SLUG', 'wpe-php-compat' );
 define( 'WPEPHPCOMPAT_CAPABILITY', 'manage_options' );
+define( 'WPEPHPCOMPAT_VERSION', '1.6.4' );
 
 use WPEngine_PHPCompat\PHP_Compatibility_Checker;
 
@@ -33,9 +33,6 @@ function wpe_phpcompat_loader() {
 	$register_phpcompat = new PHP_Compatibility_Checker();
 	$register_phpcompat->init();
 
-	// Load the text domain.
-	load_plugin_textdomain( 'wpe-php-compat', false, dirname( dirname( __FILE__ ) ) . '/languages' );
-
 	// Add plugin action link.
 	add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $register_phpcompat, 'filter_plugin_links' ) );
 }
@@ -45,21 +42,21 @@ function wpe_phpcompat_loader() {
  *
  * @since 1.0.0
  *
- * @param string $class The name of the class to get.
+ * @param string $class_name The name of the class to get.
  * @return string
  */
-function wpe_phpcompat_get_class_file( $class ) {
+function wpe_phpcompat_get_class_file( $class_name ) {
 
 	$prefix   = 'WPEngine_PHPCompat\\';
 	$base_dir = __DIR__ . '/lib/';
 
 	$len = strlen( $prefix );
 
-	if ( 0 !== strncmp( $prefix, $class, $len ) ) {
+	if ( 0 !== strncmp( $prefix, $class_name, $len ) ) {
 		return '';
 	}
 
-	$relative_class = substr( $class, $len );
+	$relative_class = substr( $class_name, $len );
 	$file           = $base_dir . str_replace( '\\', '/', 'class-' . strtolower( str_replace( '_', '-', $relative_class ) ) ) . '.php';
 
 	$relative_class_parts = explode( '\\', $relative_class );
@@ -77,11 +74,11 @@ function wpe_phpcompat_get_class_file( $class ) {
  *
  * @since 1.0.0
  *
- * @param object $class The class to load.
+ * @param string $class_name The class to load.
  */
-function wpe_phpcompat_autoloader( $class ) {
+function wpe_phpcompat_autoloader( $class_name ) {
 
-	$file = wpe_phpcompat_get_class_file( $class );
+	$file = wpe_phpcompat_get_class_file( $class_name );
 
 	if ( ! empty( $file ) && file_exists( $file ) ) {
 		include $file;
@@ -132,7 +129,7 @@ function maybe_migrate_to_wptide() {
 		}
 
 		$found_jobs = count( $jobs );
-		$paged ++;
+		++$paged;
 	} while ( $found_jobs );
 
 	update_option( 'wpephpcompat_is_wptide', 1 );
@@ -167,8 +164,20 @@ function uninstall() {
 function upgrade( $upgrader, $hook_extra ) {
 	$current_plugin_path_name = plugin_basename( __FILE__ );
 
-	if ( 'update' === $hook_extra['action'] && 'plugin' === $hook_extra['type'] ) {
-		foreach ( $hook_extra['plugins'] as $plugin ) {
+	if (
+		isset( $hook_extra['action'], $hook_extra['type'] ) &&
+		'update' === $hook_extra['action'] &&
+		'plugin' === $hook_extra['type']
+	) {
+		// Single-plugin updates pass 'plugin'; bulk updates pass 'plugins'.
+		$plugins = array();
+		if ( ! empty( $hook_extra['plugins'] ) && is_array( $hook_extra['plugins'] ) ) {
+			$plugins = $hook_extra['plugins'];
+		} elseif ( ! empty( $hook_extra['plugin'] ) ) {
+			$plugins = array( $hook_extra['plugin'] );
+		}
+
+		foreach ( $plugins as $plugin ) {
 			if ( $plugin === $current_plugin_path_name ) {
 				maybe_migrate_to_wptide();
 			}

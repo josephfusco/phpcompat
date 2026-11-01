@@ -25,12 +25,10 @@ This plugin will lint theme and plugin code installed on your WordPress site and
 
 **This plugin relies on [Tide](https://wptide.org) that constantly scans updated versions of plugins and themes in the background. Your scan results should be near real-time, but if not that just means Tide has not yet scanned your specific plugin or theme version. Please be patient as this may take up to 10 minutes for results to be returned from Tide. Please see the [FAQ](https://wordpress.org/plugins/php-compatibility-checker/faq/) for more information.**
 
-= Update to PHP 7.4 =
+= What gets checked =
 
-* Use this plugin to check your site for compatibility up to PHP 7.4!
-* As of [July 2022](https://wordpress.org/about/stats/), 8.52% of WordPress websites run a PHP version older than PHP 7.0.
-* These versions of PHP have been [deprecated and unsupported](https://secure.php.net/supported-versions.php) for over 2 years.
-* Only 7.1% of WordPress websites run PHP 8, the current main version of PHP.
+* Results cover PHP versions up to PHP 8.0, which is the newest version Tide currently reports on.
+* Only plugins and themes available on WordPress.org can be checked. Premium, custom, or modified plugins and themes are skipped and marked as not scannable.
 
 = Disclaimer =
 *While this plugin is written to detect as many problems as accurately as possible, 100% reliable detection is very difficult to ensure. It is best practice to run comprehensive tests before you migrate to a new PHP version.*
@@ -91,6 +89,15 @@ You will find the plugin options in the WP Admin `Tools => PHP Compatibility` me
 2. Compatibility results screen
 
 == Changelog ==
+
+= Unreleased =
+- Fix PHP 8.2 "Creation of dynamic property" deprecation notice.
+- Fix "Undefined array key" warnings when updating plugins from sources other than WordPress.org.
+- Fix translations not loading: use the WordPress.org text domain (php-compatibility-checker) and stop calling load_plugin_textdomain() too early (WordPress 6.7 notice).
+- Load JavaScript translations and declare the wp-i18n and jquery script dependencies.
+- Show a clear message when a plugin or theme cannot be scanned because it is not on WordPress.org.
+- Fix PHP version ordering in scan results.
+- Correct the readme: results cover PHP up to 8.0.
 
 = 1.6.4 =
 - Updates are now served from WP Engine servers.

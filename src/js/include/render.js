@@ -1,7 +1,7 @@
 import Mustache from "mustache";
 import $ from "jquery";
-import compareVersions from "compare-versions";
-const { __ } = wp.i18n;
+import { compareVersions } from "compare-versions";
+import { __ } from "@wordpress/i18n";
 
 export function initResults(itemsToScan, activeOnly) {
   const container = $("#wpe_pcc_results");
@@ -9,7 +9,7 @@ export function initResults(itemsToScan, activeOnly) {
   container.empty();
 
   if (itemsToScan.plugins.length) {
-    container.append("<h3>" + __("Plugins", "wpe-php-compat") + "</h3>");
+    container.append("<h3>" + __("Plugins", "php-compatibility-checker") + "</h3>");
     itemsToScan.plugins.forEach((plugin) => {
       if ("yes" === plugin.active || "no" === activeOnly) {
         const view = {
@@ -25,7 +25,7 @@ export function initResults(itemsToScan, activeOnly) {
   }
 
   if (itemsToScan.themes.length) {
-    container.append("<h3>" + __("Themes", "wpe-php-compat") + "</h3>");
+    container.append("<h3>" + __("Themes", "php-compatibility-checker") + "</h3>");
     itemsToScan.themes.forEach((theme) => {
       if ("yes" === theme.active || "no" === activeOnly) {
         const view = {
@@ -51,7 +51,7 @@ export function updateResult(response, job) {
     updateResultFailure(
       {
         status: "failed",
-        message: "No scan results found",
+        message: __("No scan results found.", "php-compatibility-checker"),
       },
       job
     );

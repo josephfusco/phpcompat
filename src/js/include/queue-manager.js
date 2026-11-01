@@ -1,6 +1,7 @@
 import { updateResultFailure, updateResult } from "./render";
 import $ from "jquery";
 import { hideDownload, showDownload } from "./download";
+import { __, sprintf } from "@wordpress/i18n";
 
 const progress = $(".wpe-progress-active");
 const progressCount = $(".wpe-pcc-progress-count");
@@ -85,7 +86,27 @@ export function executeJob(job, cb) {
           updateResultFailure(
             {
               status: "failed",
-              message: "The audit of this code was interrupted, please scan again.",
+              message: __(
+                "The audit of this code was interrupted, please scan again.",
+                "php-compatibility-checker"
+              ),
+            },
+            job
+          );
+        } else if (404 === jqXHR.status) {
+          // Tide only audits plugins and themes hosted on WordPress.org.
+          updateResultFailure(
+            {
+              status: "skipped",
+              message: sprintf(
+                /* translators: 1: plugin or theme name, 2: version number. */
+                __(
+                  "%1$s %2$s could not be scanned. Only plugins and themes available on WordPress.org can be checked, so premium, custom, or modified versions are skipped.",
+                  "php-compatibility-checker"
+                ),
+                job.name,
+                job.version
+              ),
             },
             job
           );
