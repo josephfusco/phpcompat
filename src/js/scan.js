@@ -1,143 +1,163 @@
-import "../scss/scan.scss";
-import jQuery from "jquery";
-import { initQueue, runNextJob, limitQueue } from "./include/queue-manager";
-import { initResults, getSelectedIds } from "./include/render";
-import { downloadReport } from "./include/download";
+/* global checkerList */
+import '../scss/scan.scss';
+import jQuery from 'jquery';
+import { _n, sprintf } from '@wordpress/i18n';
+import { initQueue, runNextJob, limitQueue } from './include/queue-manager';
+import { initResults, getSelectedIds } from './include/render';
+import { downloadReport } from './include/download';
 
-(function ($) {
-  if ("undefined" === typeof checkerList) {
-    return;
-  }
+( function ( $ ) {
+	if ( 'undefined' === typeof checkerList ) {
+		return;
+	}
 
-  window.phpcompat = {};
-  window.phpcompat.queue = [];
-  window.phpcompat.total = 0;
-  window.phpcompat.completed = 0;
-  window.phpcompat.xhr = false;
-  window.phpcompat.ticker = false;
-  window.phpcompat.results = [];
+	window.phpcompat = {
+		queue: [],
+		total: 0,
+		completed: 0,
+		xhr: false,
+		ticker: false,
+		results: [],
+	};
 
-  const activeOnlySwitch = $("input[type=radio][name=active_plugins]");
-  const runButton = $("#runButton");
+	const runButton = $( '#runButton' );
 
-  init(checkerList);
+	init();
 
-  activeOnlySwitch.on("change", function () {
-    init(checkerList);
-    runButton.prop("disabled", false);
-    updateRunButton();
-    disableDeveloperMode();
-  });
+	$( '#cleanupButton' ).on( 'click', function ( event ) {
+		event.preventDefault();
+		disableDeveloperMode();
+		init();
+	} );
 
-  $("#cleanupButton").on("click", function (event) {
-    event.preventDefault();
-    runButton.prop("disabled", false);
-    disableDeveloperMode();
-    init(checkerList);
-    updateRunButton();
-  });
+	runButton.on( 'click', function ( event ) {
+		event.preventDefault();
 
-  runButton.on("click", function (event) {
-    event.preventDefault();
+		const ids = getSelectedIds();
+		if ( ! ids.length ) {
+			return;
+		}
+		limitQueue( ids );
 
-    if ("choose" === currentMode()) {
-      const ids = getSelectedIds();
-      if (!ids.length) {
-        return;
-      }
-      limitQueue(ids);
+		// Drop unselected items from the list and lock the selection.
+		$( '.wpe-pcc-select' )
+			.not( ':checked' )
+			.closest( '.wpe-pcc-alert' )
+			.remove();
+		$( '.wpe-pcc-select' ).prop( 'disabled', true );
+		$( '.wpe-pcc-select-actions' ).hide();
+		$( '#wpe_pcc_results h3' ).each( function () {
+			if ( ! $( this ).nextUntil( 'h3', '.wpe-pcc-alert' ).length ) {
+				$( this ).remove();
+			}
+		} );
 
-      // Drop unselected items from the list and lock the selection.
-      $(".wpe-pcc-select").not(":checked").closest(".wpe-pcc-alert").remove();
-      $(".wpe-pcc-select").prop("disabled", true);
-      $(".wpe-pcc-select-actions").remove();
-      $("#wpe_pcc_results h3").each(function () {
-        if (!$(this).nextUntil("h3", ".wpe-pcc-alert").length) {
-          $(this).remove();
-        }
-      });
-    }
+		runNextJob();
+		$( '.wpe-pcc-spinner' ).show();
+		runButton.prop( 'disabled', true );
+	} );
 
-    runNextJob();
-    $(".wpe-pcc-spinner").show();
-    $(this).prop("disabled", true);
-  });
+	$( document ).on( 'change', '.wpe-pcc-select', updateRunButton );
 
-  $(document).on("change", ".wpe-pcc-select", updateRunButton);
+	$( document ).on(
+		'click',
+		'.wpe-pcc-select-actions button',
+		function ( event ) {
+			event.preventDefault();
+			const select = $( this ).data( 'select' );
+			$( '.wpe-pcc-select' ).each( function () {
+				let checked = 'all' === select;
+				if ( 'active' === select ) {
+					checked = 'yes' === $( this ).data( 'active' );
+				}
+				$( this ).prop( 'checked', checked );
+			} );
+			updateRunButton();
+		}
+	);
 
-  $(document).on("click", ".wpe-pcc-select-actions a", function (event) {
-    event.preventDefault();
-    $(".wpe-pcc-select").prop("checked", "all" === $(this).data("select"));
-    updateRunButton();
-  });
+	$( document ).on(
+		'click',
+		'.wpe-pcc-php-version-errors',
+		function ( event ) {
+			event.preventDefault();
+			const button = $( this );
+			const phpVersion = button.data( 'php-version' );
+			const report = button
+				.closest( '.wpe-pcc-alert' )
+				.find(
+					`.wpe-pcc-php-version-report[data-php-version="${ phpVersion }"]`
+				);
+			const opening = ! report.is( ':visible' );
 
-  $(document).on("click", ".wpe-pcc-php-version-errors", function (event) {
-    event.preventDefault();
-    const button = $(this);
-    const phpVersion = button.data("php-version");
-    const report = button
-      .closest(".wpe-pcc-alert")
-      .find(`.wpe-pcc-php-version-report[data-php-version="${phpVersion}"]`);
-    const opening = !report.is(":visible");
+			// Only one report open at a time.
+			$( '.wpe-pcc-php-version-report' ).not( report ).hide();
+			$( '.wpe-pcc-php-version-errors' )
+				.not( button )
+				.attr( 'aria-expanded', 'false' );
 
-    // Only one report open at a time.
-    $(".wpe-pcc-php-version-report").not(report).hide();
-    $(".wpe-pcc-php-version-errors").not(button).attr("aria-expanded", "false");
+			report.toggle( opening );
+			button.attr( 'aria-expanded', opening ? 'true' : 'false' );
+		}
+	);
 
-    report.toggle(opening);
-    button.attr("aria-expanded", opening ? "true" : "false");
-  });
+	$( document ).on(
+		'click',
+		'.wpe-pcc-php-version-report-close',
+		function ( event ) {
+			event.preventDefault();
+			const report = $( this ).closest( '.wpe-pcc-php-version-report' );
+			const phpVersion = report.data( 'php-version' );
+			report.hide();
+			report
+				.closest( '.wpe-pcc-alert' )
+				.find(
+					`.wpe-pcc-php-version-errors[data-php-version="${ phpVersion }"]`
+				)
+				.attr( 'aria-expanded', 'false' )
+				.trigger( 'focus' );
+		}
+	);
 
-  $(document).on(
-    "click",
-    ".wpe-pcc-php-version-report-close",
-    function (event) {
-      event.preventDefault();
-      const report = $(this).closest(".wpe-pcc-php-version-report");
-      report.hide();
-      report
-        .closest(".wpe-pcc-alert")
-        .find(`.wpe-pcc-php-version-errors[data-php-version="${report.data("php-version")}"]`)
-        .attr("aria-expanded", "false")
-        .trigger("focus");
-    }
-  );
+	$( '#developermode' ).on( 'change', function () {
+		const raw = $( this ).is( ':checked' );
+		$( '#developerMode' ).toggle( raw );
+		$( '#wpe_pcc_results' ).toggle( ! raw );
+	} );
 
-  $("#developermode").on("change", function (event) {
-    if ($(this).is(":checked")) {
-      $("#developerMode").show();
-      $("#wpe_pcc_results").hide();
-    } else {
-      $("#developerMode").hide();
-      $("#wpe_pcc_results").show();
-    }
-  });
+	$( '#downloadReport' ).on( 'click', function ( event ) {
+		event.preventDefault();
+		downloadReport();
+	} );
 
-  $("#downloadReport").on("click", function (event) {
-    event.preventDefault();
-    downloadReport();
-  });
+	function init() {
+		initQueue( checkerList );
+		initResults( checkerList );
+		updateRunButton();
+	}
 
-  function currentMode() {
-    return $("input[type=radio][name=active_plugins]:checked").val();
-  }
+	// The scan button shows how many items are selected, and is disabled
+	// when there are none.
+	function updateRunButton() {
+		const count = getSelectedIds().length;
+		runButton.prop( 'disabled', ! count );
+		runButton.val(
+			sprintf(
+				/* translators: %d: number of selected plugins and themes. */
+				_n(
+					'Scan %d item',
+					'Scan %d items',
+					count,
+					'php-compatibility-checker'
+				),
+				count
+			)
+		);
+	}
 
-  function init(itemsToScan) {
-    const mode = currentMode();
-    initQueue(itemsToScan, mode);
-    initResults(itemsToScan, mode);
-  }
-
-  // In "choose" mode, only allow scanning when something is selected.
-  function updateRunButton() {
-    if ("choose" === currentMode()) {
-      runButton.prop("disabled", !getSelectedIds().length);
-    }
-  }
-
-  function disableDeveloperMode() {
-    $("#developermode").prop("checked", false);
-    $("#developerMode").hide();
-    $("#wpe_pcc_results").show();
-  }
-})(jQuery);
+	function disableDeveloperMode() {
+		$( '#developermode' ).prop( 'checked', false );
+		$( '#developerMode' ).hide();
+		$( '#wpe_pcc_results' ).show();
+	}
+} )( jQuery );

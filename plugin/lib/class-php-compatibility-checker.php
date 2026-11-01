@@ -332,45 +332,26 @@ class PHP_Compatibility_Checker {
 				</p>
 				<p><?php esc_html_e( 'If something fails, check for an update first. A newer version may already be compatible.', 'php-compatibility-checker' ); ?></p>
 				<hr>
-				<div class="wpe-pcc-scan-options">
-					<h2><?php esc_html_e( 'Scan Options', 'php-compatibility-checker' ); ?></h2>
-					<table class="form-table wpe-pcc-form-table">
-						<tbody>
-							<tr>
-								<th scope="row"><label for="active_plugins"><?php esc_html_e( 'Plugin / Theme Status', 'php-compatibility-checker' ); ?></label></th>
-								<td>
-									<fieldset>
-										<label><input type="radio" name="active_plugins" value="yes" checked="checked" /> <?php esc_html_e( 'Only scan active plugins and theme', 'php-compatibility-checker' ); ?></label><br>
-										<label><input type="radio" name="active_plugins" value="no" /> <?php esc_html_e( 'Scan all plugins and themes', 'php-compatibility-checker' ); ?></label><br>
-										<label><input type="radio" name="active_plugins" value="choose" /> <?php esc_html_e( 'Choose which plugins and themes to scan', 'php-compatibility-checker' ); ?></label>
-									</fieldset>
-								</td>
-							</tr>
-							<tr>
-								<th scope="row"></th>
-									<td>
-										<div class="wpe-pcc-run-scan">
-											<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button button-primary" />
-											<div class="wpe-pcc-scan-information">
-												<span style="display:none; visibility:visible;" class="spinner wpe-pcc-spinner"></span>
-												<span class="wpe-progress-active" style="display:none;">
-													<?php esc_html_e( 'Now scanning:', 'php-compatibility-checker' ); ?>
-													<span class="wpe-pcc-progress-count"></span>
-												</span>
-											</div> <!-- /wpe-pcc-scan-information -->
-										</div> <!-- /wpe-pcc-run-scan -->
-									</td>
-								</th>
-							</tr>
-						</tbody>
-					</table>
-				</div> <!-- /wpe-pcc-scan-options -->
+				<div class="wpe-pcc-results">
+					<h2><?php esc_html_e( 'Plugins and themes', 'php-compatibility-checker' ); ?></h2>
 
-				<div class="wpe-pcc-results" style="display:none;">
-					<hr>
-					<h2>
-						<?php esc_html_e( 'Scan Results for PHP Compatibility', 'php-compatibility-checker' ); ?>
-					</h2>
+					<div class="wpe-pcc-toolbar">
+						<div class="wpe-pcc-run-scan">
+							<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button button-primary" />
+							<div class="wpe-pcc-scan-information">
+								<span style="display:none; visibility:visible;" class="spinner wpe-pcc-spinner"></span>
+								<span class="wpe-progress-active" style="display:none;">
+									<?php esc_html_e( 'Now scanning:', 'php-compatibility-checker' ); ?>
+									<span class="wpe-pcc-progress-count"></span>
+								</span>
+							</div>
+						</div>
+						<div class="wpe-pcc-select-actions" role="group" aria-label="<?php esc_attr_e( 'Select plugins and themes', 'php-compatibility-checker' ); ?>">
+							<button type="button" class="button-link" data-select="all"><?php esc_html_e( 'Select all', 'php-compatibility-checker' ); ?></button>
+							<button type="button" class="button-link" data-select="none"><?php esc_html_e( 'Select none', 'php-compatibility-checker' ); ?></button>
+							<button type="button" class="button-link" data-select="active"><?php esc_html_e( 'Active only', 'php-compatibility-checker' ); ?></button>
+						</div>
+					</div>
 
 					<div id="wpe-pcc-download-report" class="wpe-pcc-download-report" style="display:none;">
 						<button type="button" id="downloadReport" class="button wpe-pcc-button-with-icon"><?php $this->the_icon( 'download', 'download' ); ?> <?php esc_html_e( 'Download report', 'php-compatibility-checker' ); ?></button>
@@ -386,7 +367,7 @@ class PHP_Compatibility_Checker {
 					<div id="wpe_pcc_results"></div>
 
 					<div style="display:none;" id="developerMode">
-						<textarea readonly="readonly" id="testResults"></textarea>
+						<textarea readonly="readonly" id="testResults" class="wpe-pcc-raw-report" aria-label="<?php esc_attr_e( 'Scan results as text', 'php-compatibility-checker' ); ?>"></textarea>
 					</div>
 
 					<div class="notice notice-info inline wpe-pcc-attention">
@@ -469,12 +450,14 @@ class PHP_Compatibility_Checker {
 					<p class="wpe-pcc-card-title">
 						{{#selectable}}
 						<label>
-							<input type="checkbox" class="wpe-pcc-select" value="{{type}}_{{slug}}" {{#checked}}checked="checked"{{/checked}} />
+							<input type="checkbox" class="wpe-pcc-select" value="{{type}}_{{slug}}" data-active="{{active}}" checked="checked" />
 							<strong>{{name}}</strong> <span class="wpe-pcc-card-version">{{version}}</span>
+							{{#inactive}}<span class="wpe-pcc-tag"><?php esc_html_e( 'Inactive', 'php-compatibility-checker' ); ?></span>{{/inactive}}
 						</label>
 						{{/selectable}}
 						{{^selectable}}
 						<strong>{{name}}</strong> <span class="wpe-pcc-card-version">{{version}}</span>
+						{{#inactive}}<span class="wpe-pcc-tag"><?php esc_html_e( 'Inactive', 'php-compatibility-checker' ); ?></span>{{/inactive}}
 						{{/selectable}}
 					</p>
 					{{#badge_success}}<span class="wpe-pcc-badge wpe-pcc-badge-success"><?php $this->the_icon( 'published', 'yes-alt' ); ?><?php esc_html_e( 'Passes', 'php-compatibility-checker' ); ?></span>{{/badge_success}}

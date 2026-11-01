@@ -227,3 +227,8 @@ clover.xml
 .vscode/*.log
 
 .wp-env.override.json
+
+# Playwright
+/artifacts/
+/test-results/
+/playwright-report/

@@ -1,383 +1,409 @@
-// Colors and sizes come from WordPress's design tokens (wp-theme, WordPress
-// 7.0+). Each token has a fallback so the page looks the same on older versions.
-$surface: var(--wpds-color-background-surface-neutral-strong, #fff);
-$surface-weak: var(--wpds-color-background-surface-neutral-weak, #f4f4f4);
-$stroke: var(--wpds-color-stroke-surface-neutral, #dcdcde);
-$text: var(--wpds-color-foreground-content-neutral, #1e1e1e);
-$text-weak: var(--wpds-color-foreground-content-neutral-weak, #707070);
-$radius: var(--wpds-border-radius-md, 4px);
+// Colors and sizes come from WordPress design tokens (WordPress 7.0+).
+// Fallbacks for older versions are added at build time (postcss.config.js).
+$surface: var(--wpds-color-background-surface-neutral-strong);
+$surface-weak: var(--wpds-color-background-surface-neutral-weak);
+$stroke: var(--wpds-color-stroke-surface-neutral);
+$text: var(--wpds-color-foreground-content-neutral);
+$text-weak: var(--wpds-color-foreground-content-neutral-weak);
+$radius: var(--wpds-border-radius-md);
 $radius-pill: 999px;
 $focus: var(--wp-admin-theme-color, #3858e9);
 
-$success: var(--wpds-color-foreground-content-success-weak, #008030);
-$success-bg: var(--wpds-color-background-surface-success-weak, #ebffed);
-$error: var(--wpds-color-foreground-content-error-weak, #cc1818);
-$error-bg: var(--wpds-color-background-surface-error-weak, #fff6f5);
-$warning: var(--wpds-color-foreground-content-warning-weak, #926300);
-$warning-bg: var(--wpds-color-background-surface-warning-weak, #fff7e1);
+$success: var(--wpds-color-foreground-content-success-weak);
+$success-bg: var(--wpds-color-background-surface-success-weak);
+$error: var(--wpds-color-foreground-content-error-weak);
+$error-bg: var(--wpds-color-background-surface-error-weak);
+$warning: var(--wpds-color-foreground-content-warning-weak);
+$warning-bg: var(--wpds-color-background-surface-warning-weak);
 
 @mixin focus-ring {
-  outline: 2px solid $focus;
-  outline-offset: 1px;
-  box-shadow: none;
+	outline: 2px solid $focus;
+	outline-offset: 1px;
+	box-shadow: none;
 }
 
 .wpe-pcc {
-  // Layout: main column plus the optional WP Engine sidebar. Stacks on narrow screens.
-  &-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 32px;
+	// Layout: main column plus the optional WP Engine sidebar.
+	// Stacks on narrow screens.
+	&-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 32px;
 
-    &.wpe-pcc-has-aside {
-      @media (min-width: 1100px) {
-        grid-template-columns: minmax(0, 1fr) 280px;
-      }
-    }
-  }
+		&.wpe-pcc-has-aside {
 
-  // Icons: core SVGs (WordPress 7.1+) or Dashicons fallback.
-  &-icon {
-    flex: none;
-    width: 16px;
-    height: 16px;
-    fill: currentColor;
-    vertical-align: middle;
+			@media (min-width: 1100px) {
+				grid-template-columns: minmax(0, 1fr) 280px;
+			}
+		}
+	}
 
-    &.dashicons {
-      font-size: 16px;
-      line-height: 1;
-    }
-  }
+	// Icons: core SVGs (WordPress 7.1+) or Dashicons fallback.
+	&-icon {
+		flex: none;
+		width: 16px;
+		height: 16px;
+		fill: currentcolor;
+		vertical-align: middle;
 
-  &-button-with-icon {
-    display: inline-flex !important;
-    align-items: center;
-    gap: 6px;
-  }
+		&.dashicons {
+			font-size: 16px;
+			line-height: 1;
+		}
+	}
 
-  // Scan controls.
-  &-run-scan {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-  }
+	&-button-with-icon {
+		display: inline-flex !important;
+		align-items: center;
+		gap: 6px;
+	}
 
-  &-scan-information {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
+	// Scan controls.
+	&-run-scan {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 12px;
+	}
 
-    .wpe-pcc-spinner {
-      float: none;
-      margin: 0;
-    }
-  }
+	&-scan-information {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 
-  // Results header row.
-  &-download-report {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    margin-block: 12px 16px;
-  }
+		.wpe-pcc-spinner {
+			float: none;
+			margin: 0;
+		}
+	}
 
-  &-clear-results.button-link {
-    color: $text-weak;
-  }
+	// Toolbar: scan button, progress, and selection shortcuts.
+	&-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-block: 8px 16px;
+	}
 
-  &-developer-mode {
-    margin-inline-start: auto;
-  }
+	&-select-actions {
+		display: flex;
+		gap: 16px;
+	}
 
-  // Summary line after a scan.
-  &-summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-block-end: 16px;
+	&-tag {
+		margin-inline-start: 4px;
+		padding: 0 6px;
+		border-radius: $radius-pill;
+		background: $surface-weak;
+		color: $text-weak;
+		font-size: 12px;
+	}
 
-    &:empty {
-      display: none;
-    }
+	// Results header row.
+	&-download-report {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 12px;
+		margin-block: 12px 16px;
+	}
 
-    &-item {
-      padding: 2px 10px;
-      border-radius: $radius-pill;
-      background: $surface-weak;
-      color: $text;
-      font-weight: 500;
-    }
+	&-clear-results.button-link {
+		color: $text-weak;
+	}
 
-    &-success {
-      background: $success-bg;
-      color: $success;
-    }
+	&-developer-mode {
+		margin-inline-start: auto;
+	}
 
-    &-problems,
-    &-failed {
-      background: $error-bg;
-      color: $error;
-    }
+	// Summary line after a scan.
+	&-summary {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-block-end: 16px;
 
-    &-skipped {
-      background: $warning-bg;
-      color: $warning;
-    }
-  }
+		&:empty {
+			display: none;
+		}
 
-  &-select-actions {
-    margin-block: 0 12px;
-  }
+		&-item {
+			padding: 2px 10px;
+			border-radius: $radius-pill;
+			background: $surface-weak;
+			color: $text;
+			font-weight: 500;
+		}
 
-  // Result cards.
-  &-alert {
-    position: relative;
-    margin-block-end: 8px;
-    padding: 12px 16px;
-    background: $surface;
-    border: 1px solid $stroke;
-    border-inline-start: 4px solid $stroke;
-    border-radius: $radius;
-    color: $text;
+		&-success {
+			background: $success-bg;
+			color: $success;
+		}
 
-    p {
-      margin: 0;
-    }
+		&-problems,
+		&-failed {
+			background: $error-bg;
+			color: $error;
+		}
 
-    > * + * {
-      margin-block-start: 8px;
-    }
+		&-skipped {
+			background: $warning-bg;
+			color: $warning;
+		}
+	}
 
-    .spinner {
-      position: absolute;
-      inset-block-start: 10px;
-      inset-inline-end: 8px;
-      margin: 0;
-      visibility: visible;
-    }
 
-    &-success {
-      border-inline-start-color: $success;
-    }
+	// Result cards.
+	&-alert {
+		position: relative;
+		margin-block-end: 8px;
+		padding: 12px 16px;
+		background: $surface;
+		border: 1px solid $stroke;
+		border-inline-start: 4px solid $stroke;
+		border-radius: $radius;
+		color: $text;
 
-    &-error {
-      border-inline-start-color: $error;
-    }
+		p {
+			margin: 0;
+		}
 
-    &-skipped {
-      border-inline-start-color: $warning;
-    }
-  }
+		> * + * {
+			margin-block-start: 8px;
+		}
 
-  &-card-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-height: 24px;
-  }
+		.spinner {
+			position: absolute;
+			inset-block-start: 10px;
+			inset-inline-end: 8px;
+			margin: 0;
+			visibility: visible;
+		}
 
-  &-card-title {
-    label {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
+		&-success {
+			border-inline-start-color: $success;
+		}
 
-    input[type="checkbox"] {
-      margin: 0;
-    }
-  }
+		&-error {
+			border-inline-start-color: $error;
+		}
 
-  &-card-version {
-    color: $text-weak;
-  }
+		&-skipped {
+			border-inline-start-color: $warning;
+		}
+	}
 
-  &-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: $radius-pill;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 20px;
-    white-space: nowrap;
+	&-card-header {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-height: 24px;
+	}
 
-    &-success {
-      background: $success-bg;
-      color: $success;
-    }
+	&-card-title {
 
-    &-error {
-      background: $error-bg;
-      color: $error;
-    }
+		label {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+		}
 
-    &-warning {
-      background: $warning-bg;
-      color: $warning;
-    }
-  }
+		input[type="checkbox"] {
+			margin: 0;
+		}
+	}
 
-  // PHP version chips.
-  &-versions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+	&-card-version {
+		color: $text-weak;
+	}
 
-    li {
-      margin: 0;
-    }
-  }
+	&-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 2px 8px;
+		border-radius: $radius-pill;
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 20px;
+		white-space: nowrap;
 
-  &-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    min-height: 24px;
-    padding: 0 8px;
-    border: 1px solid transparent;
-    border-radius: $radius-pill;
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    line-height: 22px;
+		&-success {
+			background: $success-bg;
+			color: $success;
+		}
 
-    &-pass {
-      background: $success-bg;
-      color: $success;
-    }
+		&-error {
+			background: $error-bg;
+			color: $error;
+		}
 
-    &-fail {
-      background: $error-bg;
-      border-color: currentColor;
-      color: $error;
-      cursor: pointer;
-      font: inherit;
-      font-size: 12px;
+		&-warning {
+			background: $warning-bg;
+			color: $warning;
+		}
+	}
 
-      &:hover,
-      &[aria-expanded="true"] {
-        background: $error;
-        color: #fff;
-      }
+	// PHP version chips.
+	&-versions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
 
-      &:focus-visible {
-        @include focus-ring;
-      }
-    }
+		li {
+			margin: 0;
+		}
+	}
 
-    &-unsupported {
-      background: $surface-weak;
-      color: $text-weak;
-      text-decoration: line-through;
-    }
-  }
+	&-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		min-height: 24px;
+		padding: 0 8px;
+		border: 1px solid transparent;
+		border-radius: $radius-pill;
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		line-height: 22px;
 
-  &-hint {
-    color: $text-weak;
-  }
+		&-pass {
+			background: $success-bg;
+			color: $success;
+		}
 
-  &-message {
-    color: $text;
-  }
+		&-fail {
+			background: $error-bg;
+			border-color: currentcolor;
+			color: $error;
+			cursor: pointer;
+			font: inherit;
+			font-size: 12px;
 
-  // Problem details for one PHP version.
-  &-php-version-report {
-    margin-block-start: 8px;
-    border: 1px solid $stroke;
-    border-radius: $radius;
-    background: $surface-weak;
-  }
+			&:hover,
+			&[aria-expanded="true"] {
+				background: $error;
+				color: #fff;
+			}
 
-  &-report-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    border-block-end: 1px solid $stroke;
+			&:focus-visible {
 
-    h4 {
-      margin: 0;
-    }
-  }
+				@include focus-ring;
+			}
+		}
 
-  &-php-version-report textarea,
-  #testResults {
-    display: block;
-    width: 100%;
-    height: 30em;
-    max-height: 70vh;
-    padding: 12px;
-    border: 0;
-    border-radius: 0 0 $radius $radius;
-    background: $surface;
-    font-family: Menlo, Consolas, Monaco, "Liberation Mono", "Courier New", monospace;
-    font-size: 12px;
-    resize: vertical;
-  }
+		&-unsupported {
+			background: $surface-weak;
+			color: $text-weak;
+			text-decoration: line-through;
+		}
+	}
 
-  #testResults {
-    border: 1px solid $stroke;
-    border-radius: $radius;
-  }
+	&-hint {
+		color: $text-weak;
+	}
 
-  &-attention.notice {
-    margin: 16px 0 0;
-  }
+	&-message {
+		color: $text;
+	}
 
-  &-footer {
-    margin-block-start: 24px;
-    color: $text-weak;
+	// Problem details for one PHP version.
+	&-php-version-report {
+		margin-block-start: 8px;
+		border: 1px solid $stroke;
+		border-radius: $radius;
+		background: $surface-weak;
+	}
 
-    ul {
-      margin-block-start: 4px;
-    }
-  }
+	&-report-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 8px 12px;
+		border-block-end: 1px solid $stroke;
 
-  // WP Engine sidebar (only on WP Engine-hosted sites).
-  &-aside {
-    h2 {
-      margin-block: 0 12px;
-      font-size: 1.15em;
-      line-height: 1.3;
-    }
+		h4 {
+			margin: 0;
+		}
+	}
 
-    &-content {
-      margin-block-start: 16px;
-      padding: 16px;
-      background: $surface;
-      border: 1px solid $stroke;
-      border-radius: $radius;
+	&-php-version-report textarea,
+	.wpe-pcc-raw-report {
+		display: block;
+		width: 100%;
+		height: 30em;
+		max-height: 70vh;
+		padding: 12px;
+		border: 0;
+		border-radius: 0 0 $radius $radius;
+		background: $surface;
+		font-family: Menlo, Consolas, Monaco, "Liberation Mono", "Courier New", monospace;
+		font-size: 12px;
+		resize: vertical;
+	}
 
-      p {
-        margin: 0;
-      }
+	.wpe-pcc-raw-report {
+		border: 1px solid $stroke;
+		border-radius: $radius;
+	}
 
-      p + p {
-        margin-block-start: 12px;
-      }
-    }
+	&-attention.notice {
+		margin: 16px 0 0;
+	}
 
-    &-button.button {
-      display: block;
-      width: 100%;
-      margin-block: 16px 12px;
-      text-align: center;
-    }
-  }
+	&-footer {
+		margin-block-start: 24px;
+		color: $text-weak;
 
-  &-logo {
-    display: block;
-    max-width: 182px;
-    margin-inline: auto;
-    text-align: center;
-  }
+		ul {
+			margin-block-start: 4px;
+		}
+	}
+
+	// WP Engine sidebar (only on WP Engine-hosted sites).
+	&-aside {
+
+		h2 {
+			margin-block: 0 12px;
+			font-size: 1.15em;
+			line-height: 1.3;
+		}
+
+		&-content {
+			margin-block-start: 16px;
+			padding: 16px;
+			background: $surface;
+			border: 1px solid $stroke;
+			border-radius: $radius;
+
+			p {
+				margin: 0;
+			}
+
+			p + p {
+				margin-block-start: 12px;
+			}
+		}
+
+		&-button.button {
+			display: block;
+			width: 100%;
+			margin-block: 16px 12px;
+			text-align: center;
+		}
+	}
+
+	&-logo {
+		display: block;
+		max-width: 182px;
+		margin-inline: auto;
+		text-align: center;
+	}
 }

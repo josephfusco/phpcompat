@@ -1,3 +1,10 @@
 {
-	"plugins": ["./plugin"]
+	"plugins": [ "./plugin" ],
+	"env": {
+		"tests": {
+			"mappings": {
+				"wp-content/mu-plugins/phpcompat-e2e.php": "./tests/e2e/fixtures/phpcompat-e2e.php"
+			}
+		}
+	}
 }
