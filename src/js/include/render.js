@@ -135,13 +135,6 @@ export function updateResult(response, job) {
     fullReport + (fullReport.length ? "\n\n\n" : "") + rawReport;
 
   $("#testResults").val(updatedReport);
-  const blob = new Blob([updatedReport], { type: "text/plain"});
-  const reader = new FileReader();
-  reader.readAsDataURL(blob);
-  reader.onloadend = function () {
-    const base64Data = reader.result.split(",")[1];
-    $("#wpe-pcc-codeable-data").val(base64Data);
-  }
 }
 
 export function processFileReport(fileName, fileReport) {
@@ -222,7 +215,4 @@ export function updateResultFailure(response, job) {
     fullReport + (fullReport.length ? "\n\n\n" : "") + rawReport;
 
   $("#testResults").val(updatedReport);
-  $("#wpe-pcc-codeable-data").val(
-    Buffer.from(updatedReport).toString("base64")
-  );
 }

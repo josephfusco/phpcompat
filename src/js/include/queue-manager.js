@@ -20,6 +20,7 @@ export function initQueue(itemsToScan, activeOnly) {
 
   hideDownload();
   resetProgress();
+  $(".wpe-pcc-information").hide();
   $("#testResults").val("");
 
   itemsToScan.plugins.forEach((plugin) => {
@@ -130,7 +131,10 @@ export function runNextJob() {
   if (window.phpcompat.queue.length === 0) {
     resetProgress();
     showDownload();
-    $(".wpe-pcc-information").show();
+    // Only offer help when something actually failed.
+    if ($(".wpe-pcc-alert-error").length) {
+      $(".wpe-pcc-information").show();
+    }
     return;
   }
 
