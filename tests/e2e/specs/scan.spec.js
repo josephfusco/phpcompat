@@ -80,6 +80,18 @@ test.describe( 'PHP Compatibility scan', () => {
 		await expect( inactive ).toContainText( 'Inactive' );
 	} );
 
+	test( 'warns when a newer PHP security release is available', async ( {
+		admin,
+		page,
+	} ) => {
+		await admin.visitAdminPage( ...PAGE );
+
+		const notice = page.locator( '.wpe-pcc-release-notice' );
+		await expect( notice ).toBeVisible();
+		await expect( notice ).toContainText( '.999 is available' );
+		await expect( notice ).toContainText( 'includes security fixes' );
+	} );
+
 	test( 'failing versions open and close their details', async ( {
 		admin,
 		page,

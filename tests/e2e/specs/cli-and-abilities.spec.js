@@ -144,5 +144,10 @@ test.describe( 'Abilities API', () => {
 		} );
 		expect( status.php_version ).toMatch( /^\d+\.\d+$/ );
 		expect( typeof status.message ).toBe( 'string' );
+
+		// php.net data (faked by the fixture) reports a newer security release.
+		expect( status.release.state ).toBe( 'update_available' );
+		expect( status.release.latest ).toBe( `${ status.php_version }.999` );
+		expect( status.release.latest_is_security ).toBe( true );
 	} );
 } );

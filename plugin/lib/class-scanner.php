@@ -298,6 +298,7 @@ class Scanner {
 	 *     @type bool|null $is_recommended      Whether it meets WordPress's recommended version (null if unknown).
 	 *     @type string    $recommended_version WordPress's recommended version, or empty if unknown.
 	 *     @type string    $message             Plain-language summary.
+	 *     @type array     $release             Patch release status from php.net (see Php_Releases::evaluate()).
 	 * }
 	 */
 	public function php_status() {
@@ -313,6 +314,7 @@ class Scanner {
 			'is_recommended'      => isset( $response['is_supported'] ) ? (bool) $response['is_supported'] : null,
 			'recommended_version' => isset( $response['recommended_version'] ) ? (string) $response['recommended_version'] : '',
 			'message'             => $message,
+			'release'             => ( new Php_Releases() )->get_status(),
 		);
 	}
 

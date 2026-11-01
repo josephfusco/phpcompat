@@ -324,6 +324,9 @@ class PHP_Compatibility_Checker {
 	 */
 	public function scan_page() {
 
+		// Whether the server's PHP is the latest release of a supported branch.
+		$release = ( new Php_Releases() )->get_status();
+
 		// Links for the WP Engine sidebar, shown only on sites hosted on WP Engine.
 		$url_wpe_portal          = $this->get_wpe_portal_url( 'php_compatibility_checker_user_portal' );
 		$url_wpe_logo            = $this->get_wpe_portal_url( 'php_compatibility_checker_logo' );
@@ -346,6 +349,7 @@ class PHP_Compatibility_Checker {
 					?>
 				</p>
 				<p><?php esc_html_e( 'If something fails, check for an update first. A newer version may already be compatible.', 'php-compatibility-checker' ); ?></p>
+				<?php $this->release_notice( $release ); ?>
 				<hr>
 				<div class="wpe-pcc-results">
 					<h2><?php esc_html_e( 'Plugins and themes', 'php-compatibility-checker' ); ?></h2>
@@ -428,11 +432,25 @@ class PHP_Compatibility_Checker {
 							<p>
 								<?php
 								printf(
-									/* translators: %s: PHP version, e.g. 8.2 */
+									/* translators: %s: PHP version, e.g. 8.2.35 */
 									esc_html__( 'This environment runs PHP %s.', 'php-compatibility-checker' ),
-									'<strong>' . esc_html( PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION ) . '</strong>'
+									'<strong>' . esc_html( $release['current'] ) . '</strong>'
 								);
-								$php_status = $this->get_php_status_message();
+								// The page notice has the full release message; keep this short.
+								switch ( $release['state'] ) {
+									case 'update_available':
+										/* translators: %s: latest PHP release, e.g. 8.3.36 */
+										$php_status = sprintf( __( 'PHP %s is available.', 'php-compatibility-checker' ), $release['latest'] );
+										break;
+									case 'unsupported_branch':
+										$php_status = __( 'This version no longer gets security fixes.', 'php-compatibility-checker' );
+										break;
+									case 'vendor_build':
+										$php_status = __( 'Check your host\'s security notices for PHP fixes.', 'php-compatibility-checker' );
+										break;
+									default:
+										$php_status = $this->get_php_status_message();
+								}
 								if ( $php_status ) {
 									echo ' ' . esc_html( $php_status );
 								}
@@ -558,6 +576,32 @@ class PHP_Compatibility_Checker {
 		</script>
 
 		<?php
+	}
+
+	/**
+	 * Notice about the server's PHP release, shown only when it needs attention.
+	 *
+	 * @since 1.6.5
+	 *
+	 * @param array $release Status from Php_Releases::get_status().
+	 */
+	public function release_notice( $release ) {
+		$types = array(
+			'update_available'   => 'warning',
+			'unsupported_branch' => 'error',
+			'vendor_build'       => 'info',
+		);
+
+		if ( ! isset( $types[ $release['state'] ] ) ) {
+			return;
+		}
+
+		printf(
+			'<div class="notice notice-%1$s inline wpe-pcc-release-notice"><p><strong>%2$s</strong> %3$s</p></div>',
+			esc_attr( $types[ $release['state'] ] ),
+			esc_html__( 'Server PHP:', 'php-compatibility-checker' ),
+			esc_html( $release['message'] )
+		);
 	}
 
 	/**

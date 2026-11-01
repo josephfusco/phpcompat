@@ -71,7 +71,7 @@ class Abilities {
 			'php-compatibility-checker/php-status',
 			array(
 				'label'               => __( 'Get the server\'s PHP status', 'php-compatibility-checker' ),
-				'description'         => __( 'Returns the PHP version this site runs on and whether WordPress considers it secure (still getting security updates) and at or above its recommended version.', 'php-compatibility-checker' ),
+				'description'         => __( 'Returns the PHP version this site runs on, whether WordPress considers it secure and at or above its recommended version, and (from php.net) whether it is the latest patch release of a branch that still gets security fixes. Use release.state to tell whether the server needs a PHP update.', 'php-compatibility-checker' ),
 				'category'            => self::CATEGORY,
 				'output_schema'       => self::php_status_output_schema(),
 				'execute_callback'    => array( __CLASS__, 'execute_php_status' ),
@@ -284,6 +284,27 @@ class Abilities {
 				'is_recommended'      => array( 'type' => array( 'boolean', 'null' ) ),
 				'recommended_version' => array( 'type' => 'string' ),
 				'message'             => array( 'type' => 'string' ),
+				'release'             => array(
+					'type'        => 'object',
+					'description' => __( 'Whether this is the latest PHP release of a supported branch, from php.net. state: up_to_date, update_available, unsupported_branch, vendor_build (host or distribution build that may include backported fixes), or unknown.', 'php-compatibility-checker' ),
+					'properties'  => array(
+						'state'                => array(
+							'type' => 'string',
+							'enum' => array( 'up_to_date', 'update_available', 'unsupported_branch', 'vendor_build', 'unknown' ),
+						),
+						'current'              => array( 'type' => 'string' ),
+						'branch'               => array( 'type' => 'string' ),
+						'latest'               => array( 'type' => 'string' ),
+						'latest_date'          => array( 'type' => 'string' ),
+						'latest_is_security'   => array( 'type' => 'boolean' ),
+						'security_support_end' => array( 'type' => 'string' ),
+						'supported_branches'   => array(
+							'type'  => 'array',
+							'items' => array( 'type' => 'string' ),
+						),
+						'message'              => array( 'type' => 'string' ),
+					),
+				),
 			),
 		);
 	}
