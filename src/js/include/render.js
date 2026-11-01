@@ -192,10 +192,12 @@ export function processFileReport(fileName, fileReport) {
 export function updateResultFailure(response, job) {
   const resultItem = $(`#${job.type}_${job.slug}`);
   const template = $("#result-template").html().toString();
+  const skipped = "skipped" === response.status;
   const view = {
     ...job,
-    status: "error",
+    status: skipped ? "skipped" : "error",
     custom_error: true,
+    skipped,
     response: response,
   };
 

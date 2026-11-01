@@ -1,95 +1,100 @@
 # PHP Compatibility Checker
 
-> [!WARNING]
-> **PHP Compatibility Checker is no longer actively maintained.**
->
-> This software is still free to use under the license provided, but users should be aware that it is not currently maintained. No additional releases, including security releases, will be made available.
+[![CI](https://github.com/josephfusco/phpcompat/actions/workflows/ci.yml/badge.svg)](https://github.com/josephfusco/phpcompat/actions/workflows/ci.yml)
 
-An easy way to check your site for PHP Compatibility.
+A WordPress plugin that checks whether the plugins and themes on a site work with newer versions of PHP. It's on WordPress.org as [PHP Compatibility Checker](https://wordpress.org/plugins/php-compatibility-checker/) and has around 200,000 active installs.
 
-## Setup Development Environment
+This fork is actively maintained. It's where fixes are developed before being proposed upstream to [wpengine/phpcompat](https://github.com/wpengine/phpcompat).
 
-Before starting your workstation will need the following:
+## How it works
 
-* [Docker](https://www.docker.com/)
-* [Node.js](https://nodejs.org/) v20 LTS (recommended via [nvm](https://github.com/nvm-sh/nvm))
+The plugin adds **Tools → PHP Compatibility** to wp-admin. When you click **Scan site**:
 
-If using nvm, run `nvm use` in the project root to switch to the correct Node version.
+1. The plugin lists the site's plugins and themes, with their WordPress.org slugs and installed versions.
+2. The browser asks the [Tide](https://wptide.org) API for each item's audit, one at a time:
+   `https://wptide.org/api/v1/audit/wporg/{plugin|theme}/{slug}/{version}?reports=phpcs_phpcompatibilitywp`
+3. Tide has already run [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP) against that release from WordPress.org. If it hasn't, it queues the audit and the plugin retries every 5 seconds.
+4. The results page shows pass or fail per PHP version. Clicking a failing version shows the file, line, and message for each problem.
 
-1. Clone the repository
+Nothing is scanned on the site's own server, so scans don't time out or use server resources.
 
-`git@github.com:wpengine/phpcompat.git`
+### Limitations
 
-2. Setup WP-Env
+- **PHP 5.6 through 8.0 only.** That's the range Tide reports today. Support for newer versions depends on Tide upgrading PHPCompatibility. The [Tide watch workflow](.github/workflows/tide-watch.yml) flags when that changes.
+- **WordPress.org items only.** Premium, custom, and modified plugins or themes can't be checked, and are shown as "could not be scanned".
+- **Static analysis.** Code isn't executed. Code paths that exist for backwards compatibility can show up as failures, and runtime problems won't show up at all.
 
-```bash
-make setup && make start
-```
+## Code map
 
-When finished, a local WordPress will be configured at http://localhost:8888/wp-admin.
+| Path | What it is |
+| --- | --- |
+| `plugin/wpengine-phpcompat.php` | Bootstrap: constants, autoloader, activation, upgrade, and migration hooks |
+| `plugin/lib/class-php-compatibility-checker.php` | Admin page, script loading, and the list of plugins and themes to scan, with filters |
+| `plugin/lib/class-plugin-updater.php` | Serves updates from WP Engine's update server (since 1.6.4) |
+| `src/js/scan.js` | Page wiring: buttons and toggles |
+| `src/js/include/queue-manager.js` | Scan queue and Tide requests |
+| `src/js/include/render.js` | Results rendering (Mustache template in the PHP class) |
+| `plugin/build/` | Compiled assets (git-ignored; created by `npm run build`) |
 
-WordPress Credentials:
+### Filters
 
-__URL:__ _http://localhost:8888/wp-admin_
+- `phpcompat_excluded_plugins` and `phpcompat_excluded_themes`: names to leave out of scans.
+- `phpcompat_plugins_to_scan` and `phpcompat_themes_to_scan`: the final lists sent to the browser.
 
-__Admin User:__ _admin_
+## Local development
 
-__Admin Password:__ _password_
-
-If anything goes wrong and you suspect your local is frozen, you can always `make choose-violence` to rebuild the local environment and containers. Hopefully you never have to choose violence. :)
-
-## Build and Testing
-
-```bash
-make build
-```
-
-Note, assets will also build during the install phase.
-
-You can run all testing (all lints and unit tests) together with the following:
+Requirements: [Docker](https://www.docker.com/), Node.js 20 (`nvm use`), PHP 8.3+, and [Composer](https://getcomposer.org/).
 
 ```bash
-make test
+npm ci
+composer install
+npm run build
+npx wp-env start
 ```
 
-The project uses the [Brain Monkey](https://brain-wp.github.io/BrainMonkey/) library for unit testing. Once setup run the following for unit tests:
+WordPress runs at http://localhost:8888/wp-admin (user `admin`, password `password`), with the plugin mounted from `plugin/`. Go to **Tools → PHP Compatibility** and click **Scan site**.
+
+To have more to scan, install a few plugins:
 
 ```bash
-make test-unit
+npx wp-env run cli wp plugin install akismet contact-form-7 wordpress-seo --activate
 ```
 
-The project uses the WordPress e2e tests. Run the following for e2e tests:
+`npm start` rebuilds assets on change. `npx wp-env stop` stops the containers, and `npx wp-env destroy` resets everything.
+
+## Tests and linting
 
 ```bash
-make test-e2e
+vendor/bin/phpunit                       # Unit tests (Brain Monkey)
+vendor/bin/phpcs --standard=./phpcs.xml  # WordPress Coding Standards + PHPCompatibility 5.6+
+vendor/bin/phpcbf --standard=./phpcs.xml # Auto-fix lint issues
+npm run build                            # Must compile without warnings
 ```
 
-We also use [PHP_CodeSniffer](https://github.com/squizlabs/PHP_CodeSniffer) with [WordPress Coding Standards](https://github.com/WordPress/WordPress-Coding-Standards) and [JSHint](http://jshint.com/) with [WordPress' JS Standards](https://make.wordpress.org/core/handbook/best-practices/coding-standards/javascript/#installing-and-running-jshint). Linting will automagically be setup for you if you use [Visual Studio Code](https://code.visualstudio.com/). If you want to run it manually use the following:
+CI runs all of these on every pull request. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+## Automation
+
+| Workflow | What it does |
+| --- | --- |
+| [CI](.github/workflows/ci.yml) | Lint, unit tests on PHP 8.3 and 8.4, and a build check |
+| [Dependabot](.github/dependabot.yml) and [auto-merge](.github/workflows/dependabot-auto-merge.yml) | Weekly dependency updates. Dev-only minor and patch updates merge automatically once CI passes. |
+| [Tested up to](.github/workflows/tested-up-to.yml) | Weekly. Opens a PR when a new WordPress version ships. |
+| [Tide watch](.github/workflows/tide-watch.yml) | Daily. Opens an issue if Tide is down or starts reporting newer PHP versions. |
+
+The scheduled workflows and auto-merge only run on `wpengine/phpcompat`.
+
+## Building a release zip
 
 ```bash
-make test-lint
+npm run build
+cd plugin && zip -r ../php-compatibility-checker.zip . -x '*.map'
 ```
 
-or, to run an individual lint (php or javascript), use one of the following:
+## Security
 
-```bash
-make test-lint-php
-```
+Please report security issues privately to wordpress@wpengine.com rather than opening a public issue.
 
-```bash
-make test-lint-javascript
-```
+## License
 
-Screw something up? You can reset your environment with the following. It will stop the environment and cleanup and the build files as well as anything downloaded.
-
-```bash
-make reset
-```
-
-## Preparing for release
-
-To generate a .zip that can be uploaded through any normal WordPress plugin installation workflow, simply run the following:
-
-```bash
-make release
-```
+GPLv2 or later.

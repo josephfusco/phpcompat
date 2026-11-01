@@ -1,5 +1,6 @@
 $color-error: #d63638;
 $color-success: #00a32a;
+$color-skipped: #dba617;
 $color-background: #fff;
 $color-border: #c3c4c7;
 
@@ -43,6 +44,10 @@ $color-border: #c3c4c7;
 
     &-success {
       border-left-color: $color-success;
+    }
+
+    &-skipped {
+      border-left-color: $color-skipped;
     }
   }
   &-php-version {
@@ -194,6 +199,11 @@ $color-border: #c3c4c7;
       &-success {
         border-left-color: $color-border;
         border-right-color: $color-success;
+      }
+
+      &-skipped {
+        border-left-color: $color-border;
+        border-right-color: $color-skipped;
       }
     }
 
