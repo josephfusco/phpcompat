@@ -1,6 +1,7 @@
-<?php
+<?php // phpcs:ignore WordPress.Files.FileName.InvalidClassFileName -- Shared WP Engine updater; file name kept for compatibility.
 /**
  * The PluginUpdater class which can be used to pull plugin updates from a new location.
+ *
  * @package your-plugin-package-name
  */
 
@@ -19,18 +20,21 @@ use stdClass;
 class PluginUpdater {
 	/**
 	 * The URL where the api is located.
+	 *
 	 * @var string
 	 */
 	private $api_url;
 
 	/**
 	 * The amount of time to wait before checking for new updates.
+	 *
 	 * @var int
 	 */
 	private $cache_time;
 
 	/**
 	 * These properties are passed in when instantiating to identify the plugin and it's update location.
+	 *
 	 * @var array
 	 */
 	private $properties;
@@ -45,7 +49,7 @@ class PluginUpdater {
 			empty( $properties['plugin_slug'] ) ||
 			empty( $properties['plugin_basename'] )
 		) {
-			error_log( 'WPE Secure Plugin Updater received a malformed request.' );
+			error_log( 'WPE Secure Plugin Updater received a malformed request.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			return;
 		}
 

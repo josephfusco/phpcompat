@@ -10,7 +10,7 @@
 	"homepage": "https://wpengine.com",
 	"scripts": {
 		"build": "wp-scripts build --output-path=plugin/build && cp readme.txt plugin/",
-		"makepot": "./vendor/bin/wp i18n make-pot plugin --slug=wpe-php-compat",
+		"makepot": "./vendor/bin/wp i18n make-pot plugin --slug=php-compatibility-checker",
 		"test:e2e": "wp-scripts test-e2e",
 		"start": "wp-scripts start --output-path=plugin/build",
 		"wp-env": "wp-env"
