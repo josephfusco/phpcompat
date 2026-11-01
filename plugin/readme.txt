@@ -93,6 +93,9 @@ Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back
 - Load JavaScript translations and declare the wp-i18n and jquery script dependencies.
 - Show a clear "could not be scanned" message, with its own style, when a plugin or theme is not on WordPress.org.
 - Clarify on the scan page where results come from and which PHP versions they cover.
+- WP Engine sidebar (shown only on WP Engine-hosted sites): replace the outdated PHP 7 upgrade pitch with how to test a new PHP version safely using PHP Test Driver or a staging environment, and show the environment's current PHP version.
+- Only show the "Need help fixing these issues?" panel when a scan finds problems.
+- Remove the "Submit to Codeable" form; the Codeable endpoint no longer accepts reports.
 - Fix PHP version ordering in scan results.
 - Correct the readme: results cover PHP up to 8.0. Remove outdated install, FAQ, and whitelist information.
 

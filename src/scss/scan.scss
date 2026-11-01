@@ -98,7 +98,6 @@ $color-border: #c3c4c7;
 
     h2 {
       line-height: 1.15em;
-      text-transform: capitalize;
 
       &:first-child {
         margin-top: 0;
@@ -114,6 +113,10 @@ $color-border: #c3c4c7;
       p {
         margin: 0;
         padding: 0;
+      }
+
+      p + p {
+        margin-top: 1em;
       }
     }
   }
@@ -221,10 +224,4 @@ $color-border: #c3c4c7;
       padding-right: 0;
     }
   }
-}
-
-input.wpe-pcc-button {
-	display: block;
-	border: 0 none;
-	width: 100%;
 }
