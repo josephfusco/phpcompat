@@ -315,8 +315,17 @@ class PHP_Compatibility_Checker {
 		<div class="wrap wpe-pcc-wrap">
 			<h1><?php esc_html_e( 'PHP Compatibility Checker', 'php-compatibility-checker' ); ?></h1>
 			<div class="wpe-pcc-main">
-				<p><?php esc_html_e( 'The PHP Compatibility Checker can be used on any WordPress website on any web host.', 'php-compatibility-checker' ); ?></p>
-				<p><?php esc_html_e( 'This tool will lint your theme and plugin code on this site and provide you a report of compatibility issues. These issues are categorized into errors and warnings and will list the file and line number of the offending code, as well as the info about why that line of code is incompatible with the chosen version of PHP. This tool will also suggest updates to themes and plugins, as a new version may offer compatible code.', 'php-compatibility-checker' ); ?></p>
+				<p><?php esc_html_e( 'Check whether the plugins and themes on this site work with newer versions of PHP. It works on any WordPress site, on any host.', 'php-compatibility-checker' ); ?></p>
+				<p>
+					<?php
+					printf(
+						/* translators: %s: Tide URL */
+						wp_kses_post( __( 'Results come from <a target="_blank" href="%s">Tide</a>, which audits plugins and themes on WordPress.org with PHPCompatibility. For each one you\'ll see which PHP versions it passes, and for failures, the file, line, and reason. Results cover PHP 5.6 through 8.0. Plugins and themes that aren\'t on WordPress.org can\'t be checked.', 'php-compatibility-checker' ) ),
+						esc_url( 'https://wptide.org/' )
+					);
+					?>
+				</p>
+				<p><?php esc_html_e( 'If something fails, check for an update first. A newer version may already be compatible.', 'php-compatibility-checker' ); ?></p>
 				<hr>
 				<div class="wpe-pcc-scan-options">
 					<h2><?php esc_html_e( 'Scan Options', 'php-compatibility-checker' ); ?></h2>
@@ -394,9 +403,9 @@ class PHP_Compatibility_Checker {
 						<li>
 							<?php
 							printf(
-								/* translators: %s: GitHub Wiki URL */
+								/* translators: %s: GitHub issues URL */
 								wp_kses_post( __( 'Report false positives <a target="_blank" href="%s">on our GitHub repo</a>.', 'php-compatibility-checker' ) ),
-								'https://github.com/wpengine/phpcompat/wiki/Results'
+								'https://github.com/wpengine/phpcompat/issues'
 							);
 							?>
 						</li>
@@ -477,6 +486,10 @@ class PHP_Compatibility_Checker {
 				{{/php.length}}
 
 				{{#custom_error}}
+					{{#skipped}}
+					<p>{{response.message}}</p>
+					{{/skipped}}
+					{{^skipped}}
 					{{#response.status}}
 					<p><?php esc_html_e( 'Response status:', 'php-compatibility-checker' ); ?> {{.}}</p>
 					{{/response.status}}
@@ -486,6 +499,7 @@ class PHP_Compatibility_Checker {
 					{{#response.errors}}
 					<p>{{message}}</p>
 					{{/response.errors}}
+					{{/skipped}}
 				{{/custom_error}}
 
 				{{#reports.length}}

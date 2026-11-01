@@ -11,17 +11,13 @@ Make sure your plugins and themes are compatible with newer PHP versions.
 
 == Description ==
 
-**WARNING: PHP Compatibility Checker is no longer actively maintained.**
-
-This software is still free to use under the license provided, but users should be aware that it is not currently maintained. No additional releases, including security releases, will be made available.
-
 The WP Engine PHP Compatibility Checker can be used by any WordPress website on any web host to check PHP version compatibility.
 
 This plugin will lint theme and plugin code installed on your WordPress site and give you back a report of compatibility issues as reported by [Tide](https://wptide.org) for you to fix. Compatibility issues are categorized into errors and warnings and will list the file and line number of the offending code, as well as the info about why that line of code is incompatible with the chosen version of PHP. The plugin will also suggest updates to themes and plugins, as a new version may offer compatible code.
 
 **This plugin does not execute your theme and plugin code, as such this plugin cannot detect runtime compatibility issues.**
 
-**Please note that linting code is not perfect. This plugin cannot detect unused code-paths that might be used for backwards compatibility, and thus might show false positives. We maintain a [whitelist of plugins](https://github.com/wpengine/phpcompat/wiki/Results) that can cause false positives. We are continuously working to ensure the checker provides the most accurate results possible.**
+**Please note that linting code is not perfect. This plugin cannot detect unused code-paths that might be used for backwards compatibility, and thus might show false positives.**
 
 **This plugin relies on [Tide](https://wptide.org) that constantly scans updated versions of plugins and themes in the background. Your scan results should be near real-time, but if not that just means Tide has not yet scanned your specific plugin or theme version. Please be patient as this may take up to 10 minutes for results to be returned from Tide. Please see the [FAQ](https://wordpress.org/plugins/php-compatibility-checker/faq/) for more information.**
 
@@ -42,10 +38,10 @@ To disclose security issues for this plugin please email WordPress@wpengine.com.
 *Note: Go to 'Plugins' > 'Add New' in the WordPress admin and search for "PHP Compatibility Checker" and install it from there.*
 
 To manually install:
-1. Upload `phpcompat` to the `/wpengine-wp-content/plugins/` directory
+1. Upload the `php-compatibility-checker` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
 
-You will find the plugin options in the WP Admin `Tools => PHP Compatibility` menu. Once you click `run` it will take a few minutes to conduct the test. Feel free to navigate away from the page and check back later.
+Go to `Tools => PHP Compatibility` and click `Scan site`. Most results come back within seconds. The scan runs in your browser, so keep the page open until it finishes.
 
 == Frequently Asked Questions ==
 
@@ -59,11 +55,11 @@ You will find the plugin options in the WP Admin `Tools => PHP Compatibility` me
 
 = 3. A plugin I created is listed as not compatible, what should I do? =
 
-    We maintain a [whitelist of plugins](https://github.com/wpengine/phpcompat/wiki/Results) that cause false positives. If your plugin shows up as incompatible but you think that is wrong, please open a [GitHub issue](https://github.com/wpengine/phpcompat/issues/new) on the project, or email wordpress@wpengine.com with info about your plugin and why you know it is compatible (you have automated tests, the failure is on backwards compatibility code paths, etc).
+    Results come from [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), a static code checker, as run by [Tide](https://wptide.org). It can flag code that never runs on newer PHP, such as backwards compatibility fallbacks. If you think a result is wrong, please open a [GitHub issue](https://github.com/wpengine/phpcompat/issues) with the plugin, version, and the reported line.
 
 = 4. Can I use this to test non-WordPress PHP Projects? =
 
-    Yes! While you cannot use this WordPress plugin to test your non-WordPress projects, you can use the [Open Source PHPCompatibility Library](https://github.com/wimg/PHPCompatibility) that this plugin is built on.
+    Yes! While you cannot use this WordPress plugin to test your non-WordPress projects, you can use the [open source PHPCompatibility library](https://github.com/PHPCompatibility/PHPCompatibility) that this plugin is built on.
 
 = 5. Why was my plugin/theme skipped? =
 
@@ -77,7 +73,7 @@ You will find the plugin options in the WP Admin `Tools => PHP Compatibility` me
 
 = 7. I found a bug, or have a suggestion, can I contribute back? =
 
-    Yes! WP Engine has a public GitHub repo where you can contribute back to this plugin. Please open an issue on the [Plugin GitHub](https://github.com/wpengine/phpcompat). We actively develop this plugin, and are always happy to receive pull requests.
+    Yes! Please open an issue or pull request on the [plugin's GitHub repo](https://github.com/wpengine/phpcompat). Contributions are welcome.
 
     The plugin was created by WP Engine to help the WordPress community increase adoption of modern PHP versions. We welcome contributors to this plugin, and are excited to see how developers and other WordPress hosts use this plugin.
 
@@ -95,9 +91,10 @@ You will find the plugin options in the WP Admin `Tools => PHP Compatibility` me
 - Fix "Undefined array key" warnings when updating plugins from sources other than WordPress.org.
 - Fix translations not loading: use the WordPress.org text domain (php-compatibility-checker) and stop calling load_plugin_textdomain() too early (WordPress 6.7 notice).
 - Load JavaScript translations and declare the wp-i18n and jquery script dependencies.
-- Show a clear message when a plugin or theme cannot be scanned because it is not on WordPress.org.
+- Show a clear "could not be scanned" message, with its own style, when a plugin or theme is not on WordPress.org.
+- Clarify on the scan page where results come from and which PHP versions they cover.
 - Fix PHP version ordering in scan results.
-- Correct the readme: results cover PHP up to 8.0.
+- Correct the readme: results cover PHP up to 8.0. Remove outdated install, FAQ, and whitelist information.
 
 = 1.6.4 =
 - Updates are now served from WP Engine servers.
