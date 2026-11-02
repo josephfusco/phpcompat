@@ -56,8 +56,8 @@ class Abilities {
 		wp_register_ability(
 			'php-compatibility-checker/scan',
 			array(
-				'label'               => __( 'Scan plugins and themes for PHP compatibility', 'php-compatibility-checker' ),
-				'description'         => __( 'Checks installed plugins and themes against PHP versions using results from Tide (wptide.org). Each item gets a status: passes, problems, not_checked (not on WordPress.org, or requires a newer PHP than any version with results), pending (Tide is still auditing; try again later), or failed. PHP versions below an item\'s own "Requires PHP" are not counted. max_php_checked is the newest PHP version with results; nothing newer was checked, so don\'t treat a pass as readiness for later PHP versions.', 'php-compatibility-checker' ),
+				'label'               => __( 'Get PHP compatibility results for plugins and themes', 'php-compatibility-checker' ),
+				'description'         => __( 'Returns the stored PHPCompatibilityWP results for installed plugins and themes, for PHP 7.4 to 8.5. Results come from the last scan of each item\'s current version, run on the Tools > PHP Compatibility page or with wp php-compat scan; scanned_at says when. Each item gets a status: passes, problems (fails on at least one PHP version), not_checked (requires a newer PHP than any version checked), not_scanned (no result for this version yet; ask an administrator to run a scan), or failed. PHP versions below an item\'s own "Requires PHP" are not counted. max_php_checked is the newest PHP version checked; nothing newer was checked, so don\'t treat a pass as readiness for later PHP versions.', 'php-compatibility-checker' ),
 				'category'            => self::CATEGORY,
 				'input_schema'        => self::scan_input_schema(),
 				'output_schema'       => self::scan_output_schema(),
@@ -193,7 +193,7 @@ class Abilities {
 	 * @return array
 	 */
 	private static function scan_output_schema() {
-		$status = array( 'passes', 'problems', 'not_checked', 'pending', 'failed' );
+		$status = Scanner::STATUSES;
 		$count  = array( 'type' => 'integer' );
 
 		return array(
@@ -226,6 +226,14 @@ class Abilities {
 								'items' => array( 'type' => 'string' ),
 							),
 							'max_php_checked'  => array( 'type' => 'string' ),
+							'source'           => array(
+								'type'        => 'string',
+								'description' => __( 'wporg if the plugin or theme is on WordPress.org, otherwise local.', 'php-compatibility-checker' ),
+							),
+							'scanned_at'       => array(
+								'type'        => 'string',
+								'description' => __( 'When the result was produced (ISO 8601), or empty if not scanned.', 'php-compatibility-checker' ),
+							),
 							'php'              => array(
 								'type'  => 'array',
 								'items' => array(

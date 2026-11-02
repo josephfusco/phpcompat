@@ -4,8 +4,8 @@
  * Plugin URI:        https://wpengine.com
  * Description:       The WP Engine PHP Compatibility Checker can be used by any WordPress website on any web host to check PHP version compatibility.
  * Version:           1.6.4
- * Requires at least: 5.6
- * Requires PHP:      5.6
+ * Requires at least: 6.4
+ * Requires PHP:      7.4
  * Author:            WP Engine
  * Author URI:        https://wpengine.com/
  * Update URI:        false
@@ -21,6 +21,8 @@ namespace WPEngine_PHPCompat;
 define( 'WPEPHPCOMPAT_ADMIN_PAGE_SLUG', 'wpe-php-compat' );
 define( 'WPEPHPCOMPAT_CAPABILITY', 'manage_options' );
 define( 'WPEPHPCOMPAT_VERSION', '1.6.4' );
+define( 'WPEPHPCOMPAT_PLUGIN_FILE', __FILE__ );
+define( 'WPEPHPCOMPAT_PLUGIN_DIR', __DIR__ . '/' );
 
 use WPEngine_PHPCompat\PHP_Compatibility_Checker;
 
@@ -35,6 +37,14 @@ function wpe_phpcompat_loader() {
 
 	// Add plugin action link.
 	add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $register_phpcompat, 'filter_plugin_links' ) );
+
+	// REST API for the browser scanner: stores results, serves custom code to scan.
+	add_action(
+		'rest_api_init',
+		static function () {
+			( new Rest_Controller() )->register_routes();
+		}
+	);
 
 	// Abilities API (WordPress 6.9+): lets AI agents and other clients run scans.
 	Abilities::init();
@@ -98,25 +108,21 @@ spl_autoload_register( __NAMESPACE__ . '\wpe_phpcompat_autoloader' );
 add_action( 'plugins_loaded', __NAMESPACE__ . '\wpe_phpcompat_loader' );
 
 /**
- * Remove old options and custom post type
+ * Remove data left by versions before 1.6, which scanned on the server.
+ *
+ * Runs once; the flag records that it has.
  *
  * @return void
  */
-function maybe_migrate_to_wptide() {
-	$is_wptide = get_option( 'wpephpcompat_is_wptide', false );
-
-	if ( $is_wptide ) {
-		// No need to clean legacy options.
+function cleanup_legacy_data() {
+	if ( get_option( 'wpephpcompat_legacy_cleaned', false ) ) {
 		return;
 	}
 
-	delete_option( 'wpephpcompat.test_version' );
-	delete_option( 'wpephpcompat.only_active' );
-	delete_option( 'wpephpcompat.scan_results' );
-	delete_option( 'wpephpcompat.lock' );
-	delete_option( 'wpephpcompat.status' );
-	delete_option( 'wpephpcompat.numdirs' );
-	delete_option( 'wpephpcompat.show_notice' );
+	// Options from the old server-side scanner, plus the 1.6.x "already cleaned" flag.
+	foreach ( array( 'wpephpcompat.test_version', 'wpephpcompat.only_active', 'wpephpcompat.scan_results', 'wpephpcompat.lock', 'wpephpcompat.status', 'wpephpcompat.numdirs', 'wpephpcompat.show_notice', 'wpephpcompat_is_wptide' ) as $option ) {
+		delete_option( $option );
+	}
 
 	wp_clear_scheduled_hook( 'wpephpcompat_start_test_cron' );
 
@@ -140,7 +146,7 @@ function maybe_migrate_to_wptide() {
 		++$paged;
 	} while ( $found_jobs );
 
-	update_option( 'wpephpcompat_is_wptide', 1 );
+	update_option( 'wpephpcompat_legacy_cleaned', 1 );
 }
 
 /**
@@ -149,7 +155,7 @@ function maybe_migrate_to_wptide() {
  * @return void
  */
 function activate() {
-	maybe_migrate_to_wptide();
+	cleanup_legacy_data();
 }
 
 /**
@@ -158,8 +164,9 @@ function activate() {
  * @return void
  */
 function uninstall() {
-	maybe_migrate_to_wptide();
-	delete_option( 'wpephpcompat_is_wptide' );
+	cleanup_legacy_data();
+	delete_option( 'wpephpcompat_legacy_cleaned' );
+	Results::delete_all();
 }
 
 /**
@@ -187,7 +194,7 @@ function upgrade( $upgrader, $hook_extra ) {
 
 		foreach ( $plugins as $plugin ) {
 			if ( $plugin === $current_plugin_path_name ) {
-				maybe_migrate_to_wptide();
+				cleanup_legacy_data();
 			}
 		}
 	}

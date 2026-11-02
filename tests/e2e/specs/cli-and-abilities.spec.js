@@ -1,6 +1,6 @@
 /**
- * End-to-end tests for WP-CLI commands and Abilities API integration. Tide
- * responses come from the fixture plugin's pre_http_request mock.
+ * End-to-end tests for WP-CLI commands and Abilities API integration. Scan
+ * reports come from the fixture plugin's wpephpcompat_pre_scan_report filter.
  */
 const { spawnSync } = require( 'child_process' );
 const { test, expect } = require( '@wordpress/e2e-test-utils-playwright' );
@@ -39,7 +39,27 @@ function parseJson( stdout ) {
 	return JSON.parse( line );
 }
 
+function resetResults() {
+	wpCli( [ 'eval', 'WPEngine_PHPCompat\\Results::delete_all();' ] );
+}
+
 test.describe( 'WP-CLI', () => {
+	test.beforeAll( resetResults );
+
+	test( 'scan --cached reports items without a stored result as not scanned', () => {
+		const { stdout } = wpCli( [
+			'php-compat',
+			'scan',
+			'passing-plugin',
+			'--cached',
+			'--format=json',
+			'--fields=slug,status',
+		] );
+		expect( parseJson( stdout ) ).toEqual( [
+			{ slug: 'passing-plugin', status: 'not_scanned' },
+		] );
+	} );
+
 	test( 'scan reports each item and exits 1 when there are problems', () => {
 		const { status, stdout } = wpCli( [
 			'php-compat',
@@ -54,9 +74,10 @@ test.describe( 'WP-CLI', () => {
 		);
 		expect( rows[ 'passing-plugin' ].status ).toBe( 'passes' );
 		expect( rows[ 'problem-plugin' ].status ).toBe( 'problems' );
-		expect( rows[ 'problem-plugin' ].failing_versions ).toBe( '7.2, 7.3' );
+		expect( rows[ 'problem-plugin' ].failing_versions ).toBe( '8.0, 8.1' );
 		expect( rows[ 'new-php-plugin' ].status ).toBe( 'not_checked' );
-		expect( rows[ 'custom-plugin' ].status ).toBe( 'not_checked' );
+		// Not on WordPress.org: WP-CLI scans the installed files.
+		expect( rows[ 'custom-plugin' ].status ).toBe( 'passes' );
 		expect( rows[ 'passing-theme' ].status ).toBe( 'passes' );
 	} );
 
@@ -76,16 +97,16 @@ test.describe( 'WP-CLI', () => {
 			'php-compat',
 			'report',
 			'problem-plugin',
-			'--php=7.3',
+			'--php=8.1',
 			'--format=json',
 		] );
 		const rows = parseJson( stdout );
 		expect( rows ).toHaveLength( 1 );
 		expect( rows[ 0 ] ).toMatchObject( {
-			php: '7.3',
+			php: '8.1',
 			file: 'includes/legacy.php',
 			line: 42,
-			message: 'Example problem on PHP 7.3',
+			message: 'Example problem on PHP 8.1',
 		} );
 	} );
 } );
@@ -108,9 +129,10 @@ test.describe( 'Abilities API', () => {
 		);
 	} );
 
-	test( 'scan ability returns structured results', async ( {
-		requestUtils,
-	} ) => {
+	test( 'scan ability returns stored results', async ( { requestUtils } ) => {
+		resetResults();
+		wpCli( [ 'php-compat', 'scan', 'problem-plugin', '--format=count' ] );
+
 		const result = await requestUtils.rest( {
 			path: scanPath,
 			params: {
@@ -119,20 +141,21 @@ test.describe( 'Abilities API', () => {
 			},
 		} );
 
-		expect( result.max_php_checked ).toBe( '8.0' );
+		expect( result.max_php_checked ).toBe( '8.5' );
 		expect( result.summary.problems ).toBe( 1 );
 		expect( result.items ).toHaveLength( 1 );
 
 		const [ item ] = result.items;
 		expect( item.status ).toBe( 'problems' );
-		expect( item.failing_versions ).toEqual( [ '7.2', '7.3' ] );
+		expect( item.failing_versions ).toEqual( [ '8.0', '8.1' ] );
+		expect( item.scanned_at ).toMatch( /^\d{4}-\d{2}-\d{2}T/ );
 		expect( item.php ).toContainEqual( {
-			version: '7.0',
+			version: '7.4',
 			result: 'not_counted',
 		} );
 		expect( item.problems[ 0 ] ).toMatchObject( {
-			php: '7.2',
-			message: 'Example problem on PHP 7.2',
+			php: '8.0',
+			message: 'Example problem on PHP 8.0',
 		} );
 	} );
 

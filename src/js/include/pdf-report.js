@@ -84,9 +84,23 @@ function isCp1252( value ) {
  * @return {boolean} Needs the fallback.
  */
 export function needsUnicodeFallback( items, meta ) {
+	let date = '';
+	try {
+		date = new Date( meta.generated_at ).toLocaleString( pageLang(), {
+			month: 'long',
+			timeZoneName: 'short',
+		} );
+	} catch {}
+
 	const strings = [
 		meta.site?.name,
 		meta.site?.url,
+		// The report's own labels, in the admin's language, and its date.
+		__( 'PHP Compatibility Report', 'php-compatibility-checker' ),
+		__( 'Needs attention', 'php-compatibility-checker' ),
+		__( 'About this report', 'php-compatibility-checker' ),
+		__( 'With problems', 'php-compatibility-checker' ),
+		date,
 		...items.flatMap( ( item ) => [
 			item.name,
 			item.version,
@@ -357,9 +371,13 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 				meta.max_php_checked
 			);
 		}
-		return __(
-			'Not on WordPress.org (premium, custom, or modified).',
-			'php-compatibility-checker'
+		// The scan's own explanation (e.g. no PHP files), when it gave one.
+		return (
+			item.reason ||
+			__(
+				'Not on WordPress.org (premium, custom, or modified).',
+				'php-compatibility-checker'
+			)
 		);
 	};
 	const statusLabel = {
@@ -836,7 +854,7 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 		const sect = section();
 		const about = [
 			__(
-				'Results are static analysis by PHPCompatibilityWP, run by WP Tide on the versions published on WordPress.org. Your code is not executed, so runtime issues cannot be detected, and plugins and themes that are not on WordPress.org cannot be checked.',
+				'Results are static analysis by PHPCompatibilityWP, run in the browser on WordPress Playground. Plugins and themes from WordPress.org are checked as published there; premium, custom, and modified code is checked as installed on this site. Code is not executed, so runtime issues cannot be detected.',
 				'php-compatibility-checker'
 			),
 			__(
@@ -866,13 +884,13 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 		font( 9.5, 'normal', COLOR.link );
 		doc.text(
 			clean(
-				__( 'About WP Tide (wptide.org)', 'php-compatibility-checker' )
+				__( 'About PHPCompatibilityWP', 'php-compatibility-checker' )
 			),
 			MARGIN,
 			doc.y,
 			{
 				width: contentW,
-				link: 'https://wptide.org/',
+				link: 'https://github.com/PHPCompatibility/PHPCompatibilityWP',
 				underline: true,
 				continued: problemItems.length > 0,
 			}

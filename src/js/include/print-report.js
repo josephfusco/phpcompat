@@ -152,7 +152,8 @@ export function recommendation( item ) {
  */
 export function executiveSummary( items, meta ) {
 	const problems = items.filter( ( item ) => 'problems' === item.status );
-	const checked = items.length - meta.summary.not_checked;
+	const checked =
+		items.length - meta.summary.not_checked - ( meta.summary.failed || 0 );
 	const maxPhp = meta.max_php_checked || '–';
 	const names = ( list ) => {
 		const values = list.map( ( item ) => item.name );
@@ -237,6 +238,20 @@ export function executiveSummary( items, meta ) {
 }
 
 /**
+ * Text for a double-quoted CSS string (e.g. in `@page` content), where HTML
+ * entities aren't decoded.
+ *
+ * @param {string} value Text.
+ * @return {string} Escaped text.
+ */
+function cssString( value ) {
+	return String( value ).replace(
+		/["\\\n<]/g,
+		( char ) => `\\${ char.charCodeAt( 0 ).toString( 16 ) } `
+	);
+}
+
+/**
  * Build the report document.
  *
  * @param {Object[]} items Recorded results.
@@ -316,9 +331,13 @@ export function buildReportHtml( items, meta ) {
 				meta.max_php_checked
 			);
 		}
-		return __(
-			'Not on WordPress.org (premium, custom, or modified).',
-			'php-compatibility-checker'
+		// The scan's own explanation (e.g. no PHP files), when it gave one.
+		return (
+			item.reason ||
+			__(
+				'Not on WordPress.org (premium, custom, or modified).',
+				'php-compatibility-checker'
+			)
 		);
 	};
 
@@ -515,7 +534,7 @@ export function buildReportHtml( items, meta ) {
 <style>
 	@page {
 		margin: 18mm 16mm 20mm;
-		@bottom-left { content: "${ esc(
+		@bottom-left { content: "${ cssString(
 			sprintf(
 				/* translators: %s: plugin version number. */
 				__(
@@ -525,7 +544,7 @@ export function buildReportHtml( items, meta ) {
 				site.plugin_version || ''
 			).trim()
 		) }"; font: 8pt sans-serif; color: #50575e; }
-		@bottom-right { content: "${ esc(
+		@bottom-right { content: "${ cssString(
 			__( 'Page', 'php-compatibility-checker' )
 		) } " counter(page) " / " counter(pages); font: 8pt sans-serif; color: #50575e; }
 	}
@@ -647,7 +666,7 @@ export function buildReportHtml( items, meta ) {
 		<h2 id="about-heading">${ esc( __( 'About this report', 'php-compatibility-checker' ) ) }</h2>
 		<p>${ esc(
 			__(
-				'Results are static analysis by PHPCompatibilityWP, run by WP Tide on the versions published on WordPress.org. Your code is not executed, so runtime issues cannot be detected, and plugins and themes that are not on WordPress.org cannot be checked.',
+				'Results are static analysis by PHPCompatibilityWP, run in the browser on WordPress Playground. Plugins and themes from WordPress.org are checked as published there; premium, custom, and modified code is checked as installed on this site. Code is not executed, so runtime issues cannot be detected.',
 				'php-compatibility-checker'
 			)
 		) }</p>
@@ -663,7 +682,7 @@ export function buildReportHtml( items, meta ) {
 				'php-compatibility-checker'
 			)
 		) }</p>
-		<p><a href="https://wptide.org/">${ esc( __( 'About WP Tide (wptide.org)', 'php-compatibility-checker' ) ) }</a>${
+		<p><a href="https://github.com/PHPCompatibility/PHPCompatibilityWP">${ esc( __( 'About PHPCompatibilityWP', 'php-compatibility-checker' ) ) }</a>${
 			problemItems.length
 				? ` · <a href="${ esc( playground( problemItems ) ) }">${ esc(
 						__(

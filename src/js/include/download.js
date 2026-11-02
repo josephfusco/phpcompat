@@ -1,5 +1,6 @@
 /* global checkerList */
 import $ from 'jquery';
+import { compareVersions } from './render';
 
 export function showDownload() {
 	$( '#wpe-pcc-download-report' ).show();
@@ -55,7 +56,7 @@ export function reportMeta( items ) {
 	items.forEach( ( item ) => {
 		summary[ item.status ]++;
 		Object.keys( item.php ).forEach( ( version ) => {
-			if ( ! maxPhp || parseFloat( version ) > parseFloat( maxPhp ) ) {
+			if ( ! maxPhp || compareVersions( version, maxPhp ) > 0 ) {
 				maxPhp = version;
 			}
 		} );
@@ -65,7 +66,9 @@ export function reportMeta( items ) {
 		generator: 'PHP Compatibility Checker',
 		generated_at: new Date().toISOString(),
 		site: checkerList.site || { url: window.location.origin },
-		source: 'WP Tide (PHPCompatibilityWP)',
+		source: `PHPCompatibilityWP (${
+			checkerList.scanner?.ruleset || 'WordPress Playground'
+		})`,
 		scope: globalThis.phpcompat?.scope || 'yes',
 		max_php_checked: maxPhp,
 		summary,

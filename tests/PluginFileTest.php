@@ -86,7 +86,7 @@ class PluginFileTest extends TestCase {
 	 */
 	public function test_upgrade_single_plugin_key_runs_migration() {
 		Monkey\Functions\when( 'plugin_basename' )->justReturn( 'php-compatibility-checker/wpengine-phpcompat.php' );
-		Monkey\Functions\expect( 'get_option' )->once()->with( 'wpephpcompat_is_wptide', false )->andReturn( 1 );
+		Monkey\Functions\expect( 'get_option' )->once()->with( 'wpephpcompat_legacy_cleaned', false )->andReturn( 1 );
 
 		upgrade(
 			null,

@@ -21,8 +21,8 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		queue: [],
 		total: 0,
 		completed: 0,
-		xhr: false,
-		ticker: false,
+		scanId: 0,
+		running: false,
 		results: [],
 		report: [],
 	};
@@ -94,7 +94,10 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		function ( event ) {
 			event.preventDefault();
 			const link = $( this );
-			const report = $( `#${ link.attr( 'aria-controls' ) }` );
+			// getElementById: slugs can hold characters a selector would choke on.
+			const report = $(
+				document.getElementById( link.attr( 'aria-controls' ) )
+			);
 			const opening = ! report.is( ':visible' );
 			$( '.wpe-pcc-php-version-report' ).not( report ).hide();
 			$( '.wpe-pcc-php-version-errors' )

@@ -9,7 +9,8 @@
 	"license": "GPLv2",
 	"homepage": "https://wpengine.com",
 	"scripts": {
-		"build": "wp-scripts build --output-path=plugin/build && cp readme.txt plugin/",
+		"build": "wp-scripts build --output-path=plugin/build && npm run build:phpcs && cp readme.txt plugin/",
+		"build:phpcs": "composer install -d tools/phpcs-bundle --no-dev --no-interaction --quiet && php tools/phpcs-bundle/build.php",
 		"start": "wp-scripts start --output-path=plugin/build",
 		"wp-env": "wp-env",
 		"lint:js": "wp-scripts lint-js src tests/e2e eslint.config.js postcss.config.js playwright.config.js",
@@ -32,7 +33,9 @@
 	},
 	"dependencies": {
 		"@wordpress/a11y": "^5.0.0",
+		"@wordpress/api-fetch": "^8.0.0",
 		"@wordpress/i18n": "^7.0.0",
+		"@wp-playground/client": "3.1.62",
 		"pdfkit": "^0.20.2"
 	},
 	"overrides": {
