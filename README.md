@@ -166,7 +166,7 @@ The build and tests use WordPress's own maintained tooling, so there's little fo
 
 | Workflow | What it does |
 | --- | --- |
-| [CI](.github/workflows/ci.yml) | Lint, unit tests on PHP 8.3 and 8.4, a build check (including that no archives ship, which WordPress.org rejects), and end-to-end tests |
+| [CI](.github/workflows/ci.yml) | Lint, unit tests on PHP 8.3 and 8.4, a build check (including that no archives ship, which WordPress.org rejects), WordPress.org's Plugin Check on the build, and end-to-end tests |
 | [Dependabot](.github/dependabot.yml) and [auto-merge](.github/workflows/dependabot-auto-merge.yml) | Weekly dependency updates. Dev-only minor and patch updates merge automatically once CI passes. Scanner updates (`tools/phpcs-bundle`) always get a human review, since they change results. |
 | [Tested up to](.github/workflows/tested-up-to.yml) | Weekly. Opens a PR when a new WordPress version ships. |
 

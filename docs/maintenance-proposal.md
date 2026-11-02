@@ -98,7 +98,7 @@ The parts WP Engine would own are small: the plugin itself, one runner file (`to
 
 *Estimate:* a few hours a month, plus a day or two around each PHP release. Most dependency churn is already automated, and the work that remains is the kind that keeps results correct.
 
-CI covers PHP lint (WordPress Coding Standards, PHPCompatibility 7.4+), 78 PHP unit tests (including real scans, non-UTF-8 files, historical false positives, and Site Health), 55 JavaScript unit tests (including retries, backoff, and failure handling of the batch scanner), and 22 end-to-end tests across the scan page, reports, Site Health, permissions, WP-CLI, and the Abilities API.
+CI covers PHP lint (WordPress Coding Standards, PHPCompatibility 7.4+), WordPress.org's Plugin Check on the build (no errors or warnings), 80 PHP unit tests (including real scans, non-UTF-8 files, historical false positives, and Site Health), 55 JavaScript unit tests (including retries, backoff, and failure handling of the batch scanner), and 22 end-to-end tests across the scan page, reports, Site Health, permissions, WP-CLI, and the Abilities API.
 
 ## Risks and open questions
 

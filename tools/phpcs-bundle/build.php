@@ -77,8 +77,8 @@ foreach ( $files as $relative => $source ) {
 	hash_update( $hash, $relative . "\0" . hash_file( 'sha256', $source ) . "\n" );
 }
 
-// The files only run when the plugin includes them; don't serve them over the web.
-file_put_contents( $out . '/.htaccess', "Require all denied\n" );
+// No directory listing. (No .htaccess: WordPress.org doesn't accept hidden
+// files, and the files only define classes or exit outside WordPress.)
 file_put_contents( $out . '/index.php', "<?php\n// Silence is golden.\n" );
 
 $manifest = array(

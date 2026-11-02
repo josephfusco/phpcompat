@@ -30,6 +30,11 @@ class Abilities {
 	 * Register the ability category.
 	 */
 	public static function register_category() {
+		// The hook only fires on WordPress 6.9+, where this function exists.
+		if ( ! function_exists( 'wp_register_ability_category' ) ) {
+			return;
+		}
+
 		wp_register_ability_category(
 			self::CATEGORY,
 			array(
@@ -43,6 +48,11 @@ class Abilities {
 	 * Register the abilities.
 	 */
 	public static function register_abilities() {
+		// The hook only fires on WordPress 6.9+, where this function exists.
+		if ( ! function_exists( 'wp_register_ability' ) ) {
+			return;
+		}
+
 		$meta = array(
 			'annotations'  => array(
 				'readonly'    => true,

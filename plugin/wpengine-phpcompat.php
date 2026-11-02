@@ -17,6 +17,8 @@
 
 namespace WPEngine_PHPCompat;
 
+defined( 'ABSPATH' ) || exit;
+
 define( 'WPEPHPCOMPAT_ADMIN_PAGE_SLUG', 'wpe-php-compat' );
 define( 'WPEPHPCOMPAT_CAPABILITY', 'manage_options' );
 define( 'WPEPHPCOMPAT_VERSION', '2.0.0' );
@@ -155,6 +157,41 @@ function cleanup_legacy_data() {
  */
 function activate() {
 	cleanup_legacy_data();
+	cleanup_updater_data();
+}
+
+/**
+ * Delete what the WP Engine update server client (1.6.4) cached. Updates
+ * come from WordPress.org since 2.0.0, so nothing reads these any more.
+ *
+ * @since 2.0.0
+ *
+ * @return void
+ */
+function cleanup_updater_data() {
+	$name = 'wpesu-plugin-' . sanitize_title( dirname( plugin_basename( __FILE__ ) ) );
+	delete_option( $name );
+	delete_option( $name . '-expiry' );
+}
+
+/**
+ * One-time cleanup after the plugin is updated.
+ *
+ * Runs on the first admin page load with a new version, because during an
+ * update WordPress still runs the previous version's code.
+ *
+ * @since 2.0.0
+ *
+ * @return void
+ */
+function maybe_upgrade() {
+	if ( WPEPHPCOMPAT_VERSION === get_option( 'wpephpcompat_version' ) ) {
+		return;
+	}
+
+	cleanup_legacy_data();
+	cleanup_updater_data();
+	update_option( 'wpephpcompat_version', WPEPHPCOMPAT_VERSION );
 }
 
 /**
@@ -164,7 +201,9 @@ function activate() {
  */
 function uninstall() {
 	cleanup_legacy_data();
+	cleanup_updater_data();
 	delete_option( 'wpephpcompat_legacy_cleaned' );
+	delete_option( 'wpephpcompat_version' );
 	Results::delete_all();
 	Rest_Controller::delete_transients();
 }
@@ -203,3 +242,4 @@ function upgrade( $upgrader, $hook_extra ) {
 register_activation_hook( __FILE__, __NAMESPACE__ . '\activate' );
 register_uninstall_hook( __FILE__, __NAMESPACE__ . '\uninstall' );
 add_action( 'upgrader_process_complete', __NAMESPACE__ . '\upgrade', 10, 2 );
+add_action( 'admin_init', __NAMESPACE__ . '\maybe_upgrade' );

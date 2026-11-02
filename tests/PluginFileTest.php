@@ -108,4 +108,37 @@ class PluginFileTest extends TestCase {
 	public function test_page_property_is_declared() {
 		$this->assertTrue( property_exists( PHP_Compatibility_Checker::class, 'page' ) );
 	}
+
+	public function test_first_admin_load_after_an_update_removes_the_old_updater_cache() {
+		Monkey\Functions\when( 'plugin_basename' )->justReturn( 'php-compatibility-checker/wpengine-phpcompat.php' );
+		Monkey\Functions\when( 'sanitize_title' )->returnArg();
+		Monkey\Functions\when( 'get_option' )->alias(
+			static function ( $name, $default_value = false ) {
+				return 'wpephpcompat_version' === $name ? '1.6.4' : ( 'wpephpcompat_legacy_cleaned' === $name ? 1 : $default_value );
+			}
+		);
+		$deleted = array();
+		Monkey\Functions\when( 'delete_option' )->alias(
+			static function ( $name ) use ( &$deleted ) {
+				$deleted[] = $name;
+				return true;
+			}
+		);
+		Monkey\Functions\expect( 'update_option' )->once()->with( 'wpephpcompat_version', WPEPHPCOMPAT_VERSION );
+
+		\WPEngine_PHPCompat\maybe_upgrade();
+
+		$this->assertContains( 'wpesu-plugin-php-compatibility-checker', $deleted );
+		$this->assertContains( 'wpesu-plugin-php-compatibility-checker-expiry', $deleted );
+	}
+
+	public function test_nothing_runs_when_the_version_is_current() {
+		Monkey\Functions\when( 'get_option' )->justReturn( WPEPHPCOMPAT_VERSION );
+		Monkey\Functions\expect( 'delete_option' )->never();
+		Monkey\Functions\expect( 'update_option' )->never();
+
+		\WPEngine_PHPCompat\maybe_upgrade();
+
+		$this->assertTrue( true );
+	}
 }
