@@ -21,6 +21,9 @@
 
 namespace WPEngine_PHPCompat\Bundle;
 
+// Only runs when the plugin (or WP-CLI) includes it.
+defined( 'ABSPATH' ) || exit;
+
 /**
  * Scan a directory.
  *
@@ -85,7 +88,8 @@ function scan_targets( string $base, array $targets, array $versions ): array {
 	// Another plugin (e.g. one bundling PHP_CodeSniffer 3) may have loaded its
 	// own copy first; its results wouldn't match, so say so instead.
 	if ( version_compare( \PHP_CodeSniffer\Config::VERSION, '4.0.0', '<' ) ) {
-		throw new \RuntimeException( sprintf( 'Another plugin loaded PHP_CodeSniffer %s, which this scanner cannot use. Scan with WP-CLI (wp php-compat scan), or deactivate that plugin while scanning.', \PHP_CodeSniffer\Config::VERSION ) );
+		// Not HTML: the message goes back as JSON (REST) or plain text (WP-CLI).
+		throw new \RuntimeException( sprintf( 'Another plugin loaded PHP_CodeSniffer %s, which this scanner cannot use. Scan with WP-CLI (wp php-compat scan), or deactivate that plugin while scanning.', \PHP_CodeSniffer\Config::VERSION ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Returned as JSON or CLI text, never printed as HTML.
 	}
 
 	$result = array(
@@ -187,8 +191,9 @@ function run_phpcs( array $paths, string $test_version ): array {
 	Collect_Report::$files = array();
 
 	// phpcs reads its arguments from $_SERVER.
-	$saved_argv = isset( $_SERVER['argv'] ) ? $_SERVER['argv'] : null;
-	$saved_argc = isset( $_SERVER['argc'] ) ? $_SERVER['argc'] : null;
+	// Saved as-is and put back after the run; never output or used otherwise.
+	$saved_argv = isset( $_SERVER['argv'] ) ? $_SERVER['argv'] : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Restored unchanged after the run.
+	$saved_argc = isset( $_SERVER['argc'] ) ? $_SERVER['argc'] : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Restored unchanged after the run.
 
 	$_SERVER['argv'] = array(
 		'phpcs',
@@ -220,7 +225,7 @@ function run_phpcs( array $paths, string $test_version ): array {
 
 	$files = Collect_Report::$files;
 	if ( ! $files && '' !== trim( $output ) && false !== stripos( $output, 'error' ) ) {
-		throw new \RuntimeException( 'phpcs failed: ' . substr( Collect_Report::utf8( $output ), 0, 500 ) );
+		throw new \RuntimeException( 'phpcs failed: ' . substr( Collect_Report::utf8( $output ), 0, 500 ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Returned as JSON or CLI text, never printed as HTML.
 	}
 
 	return array( 'files' => $files );

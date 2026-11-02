@@ -17,6 +17,8 @@
 
 namespace WPEngine_PHPCompat;
 
+defined( 'ABSPATH' ) || exit;
+
 define( 'WPEPHPCOMPAT_ADMIN_PAGE_SLUG', 'wpe-php-compat' );
 define( 'WPEPHPCOMPAT_CAPABILITY', 'manage_options' );
 define( 'WPEPHPCOMPAT_VERSION', '2.0.0' );
