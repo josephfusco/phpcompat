@@ -122,7 +122,10 @@ async function boot( onStatus, cancelled ) {
 				wordpressInstallMode: 'do-not-attempt-installing',
 				disableProgressBar: true,
 			} ),
-			120000
+			// Playground normally answers in a few seconds. When it doesn't, its
+			// CDN is usually asking the browser to prove it isn't a bot, which a
+			// hidden iframe can't do: say so instead of waiting minutes.
+			45000
 		);
 		await client.isReady();
 	} catch {
@@ -130,7 +133,7 @@ async function boot( onStatus, cancelled ) {
 		stopIfCancelled();
 		throw new ScanError(
 			__(
-				'Could not load the scanner from WordPress Playground (playground.wordpress.net). Check your internet connection, and that a firewall, browser extension, or security policy is not blocking it, then scan again.',
+				'WordPress Playground (playground.wordpress.net), which runs the scanner, did not respond. It may be asking your browser to confirm you are not a bot: open playground.wordpress.net in a new tab, then scan again. Also check your internet connection, and that a firewall, browser extension, or security policy is not blocking it. WP-CLI can scan without it: wp php-compat scan.',
 				'php-compatibility-checker'
 			)
 		);
