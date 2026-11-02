@@ -1,14 +1,22 @@
 /**
- * Scans plugins and themes in the browser.
+ * Scans plugins and themes on this site, a small batch of files per request.
  *
- * PHP_CodeSniffer with PHPCompatibilityWP runs on PHP WebAssembly from
- * WordPress Playground (playground.wordpress.net), in a hidden iframe. The
- * site's server does no scanning: code from WordPress.org is downloaded
- * straight from downloads.wordpress.org, and only premium or custom code is
- * read from the server, in small batches.
+ * PHP_CodeSniffer with PHPCompatibilityWP ships in the plugin and runs on the
+ * site's own PHP. Nothing is loaded from other sites. A scan is a resumable
+ * batch job, built to stay inside shared-hosting limits:
  *
- * The plugin ships no WebAssembly: just the scanner rules (phpcs-bundle.zip,
- * about 1 MB) and the small Playground client.
+ * - One request at a time, so a scan never holds more than one PHP worker.
+ * - Adaptive batch size: each request aims to finish in about TARGET_MS. The
+ *   size grows while requests are fast and halves after a slow or failed one,
+ *   so slow hosts get small requests and fast hosts finish sooner. What's
+ *   learned carries over to the next item.
+ * - Retries with exponential backoff and jitter. A busy site (429, 503, or no
+ *   connection) is waited out, honoring Retry-After. A batch that times out
+ *   or crashes PHP is split until the file causing it is found; that file is
+ *   skipped and listed, and the rest of the item is still checked.
+ * - The server caps every batch (files and bytes) whatever is asked.
+ * - Files that change mid-scan are detected (409) and the item starts again.
+ * - Unchanged items aren't rescanned: the first request returns the stored result.
  */
 import apiFetch from '@wordpress/api-fetch';
 import { __, sprintf } from '@wordpress/i18n';
@@ -27,9 +35,52 @@ export class ScanError extends Error {
 	}
 }
 
-let enginePromise = null;
-// Bumped by stopEngine(), so a boot that is still running knows it was cancelled.
-let engineGeneration = 0;
+/**
+ * A failed batch request.
+ */
+export class BatchError extends Error {
+	/**
+	 * @param {string} message            Message.
+	 * @param {Object} details
+	 * @param {number} details.status     HTTP status (0 when there was no response).
+	 * @param {string} details.code       WordPress error code, if any.
+	 * @param {string} details.kind       "busy" (wait and retry), "batch" (retry smaller), or "fatal".
+	 * @param {number} details.retryAfter Seconds the server asked to wait, or 0.
+	 */
+	constructor(
+		message,
+		{ status = 0, code = '', kind = 'fatal', retryAfter = 0 }
+	) {
+		super( message );
+		this.status = status;
+		this.code = code;
+		this.kind = kind;
+		this.retryAfter = retryAfter;
+	}
+}
+
+/** Aim for requests this long: far below any host's limit, long enough to be efficient. */
+export const TARGET_MS = 3000;
+/** Most files per request (matches Rest_Controller::SCAN_MAX_FILES). */
+export const MAX_BATCH = 100;
+/** Files in the first request. */
+const START_BATCH = 10;
+/** Failed requests in a row (busy site, no connection) before giving up on an item. */
+const MAX_FAILURES = 6;
+/** Failures of a one-file batch before that file is skipped. */
+const FILE_ATTEMPTS = 2;
+/** Error codes that retrying can't fix. */
+const FATAL_CODES = [
+	'phpcompat_files_changed',
+	'phpcompat_no_scanner',
+	'phpcompat_unknown_item',
+	'phpcompat_no_files',
+];
+/** Times an item starts over because its files changed mid-scan. */
+const MAX_RESTARTS = 2;
+
+let batchSize = START_BATCH;
+let controller = new AbortController();
 
 /**
  * Settings from the page (see Scanner_Bundle::browser_config()).
@@ -41,376 +92,104 @@ function config() {
 }
 
 /**
- * Start (once) the PHP runtime with the scanner unpacked in it.
- *
- * @param {(text: string) => void} onStatus Called with loading progress (first call only).
- * @return {Promise<Object>} Playground client.
+ * Stop every scan in progress. The request in flight finishes on the server,
+ * but nothing more is sent.
  */
-export function getEngine( onStatus = () => {} ) {
-	if ( ! enginePromise ) {
-		const generation = engineGeneration;
-		enginePromise = boot(
-			onStatus,
-			() => generation !== engineGeneration
-		).catch( ( error ) => {
-			if ( generation === engineGeneration ) {
-				enginePromise = null;
-			}
-			throw error;
-		} );
-	}
-	return enginePromise;
-}
-
-/**
- * Remove the runtime (e.g. when a scan is cancelled), including one still loading.
- */
-export function stopEngine() {
-	engineGeneration++;
-	document.getElementById( 'wpe-pcc-engine' )?.remove();
-	enginePromise = null;
-}
-
-/**
- * @param {(text: string) => void} onStatus  Progress callback.
- * @param {() => boolean}          cancelled Whether stopEngine() was called since this boot began.
- * @return {Promise<Object>} Playground client.
- */
-async function boot( onStatus, cancelled ) {
-	const { remoteUrl, bundleUrl, sha256 } = config();
-	const stopIfCancelled = () => {
-		if ( cancelled() ) {
-			iframe?.remove();
-			throw new ScanError(
-				__( 'The scan was cancelled.', 'php-compatibility-checker' ),
-				'skipped'
-			);
-		}
-	};
-	let iframe = null;
-
-	onStatus(
-		__(
-			'Loading the scanner (about 8 MB the first time)…',
-			'php-compatibility-checker'
-		)
-	);
-
-	const [ { startPlaygroundWeb }, bundle ] = await Promise.all( [
-		import(
-			/* webpackChunkName: "playground-client" */ '@wp-playground/client'
-		),
-		fetchBundle( bundleUrl, sha256 ),
-	] );
-	stopIfCancelled();
-
-	iframe = document.createElement( 'iframe' );
-	iframe.id = 'wpe-pcc-engine';
-	iframe.title = __( 'PHP scanner', 'php-compatibility-checker' );
-	iframe.hidden = true;
-	iframe.tabIndex = -1;
-	iframe.setAttribute( 'aria-hidden', 'true' );
-	document.body.appendChild( iframe );
-
-	let client;
-	try {
-		client = await withTimeout(
-			startPlaygroundWeb( {
-				iframe,
-				remoteUrl,
-				blueprint: { preferredVersions: { php: '8.3', wp: 'latest' } },
-				wordpressInstallMode: 'do-not-attempt-installing',
-				disableProgressBar: true,
-			} ),
-			// Playground normally answers in a few seconds. When it doesn't, its
-			// CDN is usually asking the browser to prove it isn't a bot, which a
-			// hidden iframe can't do: say so instead of waiting minutes.
-			45000
-		);
-		await client.isReady();
-	} catch {
-		iframe.remove();
-		stopIfCancelled();
-		throw new ScanError(
-			__(
-				'WordPress Playground (playground.wordpress.net), which runs the scanner, did not respond. It may be asking your browser to confirm you are not a bot: open playground.wordpress.net in a new tab, then scan again. Also check your internet connection, and that a firewall, browser extension, or security policy is not blocking it. WP-CLI can scan without it: wp php-compat scan.',
-				'php-compatibility-checker'
-			)
-		);
-	}
-
-	try {
-		stopIfCancelled();
-		await client.writeFile( '/tmp/pcc-bundle.zip', bundle );
-		await runPhp(
-			client,
-			`$zip = new ZipArchive();
-			if ( true !== $zip->open( '/tmp/pcc-bundle.zip' ) || ! $zip->extractTo( '/pcc' ) ) { throw new RuntimeException( 'Could not unpack the scanner.' ); }
-			$zip->close();
-			unlink( '/tmp/pcc-bundle.zip' );
-			echo json_encode( true );`
-		);
-		stopIfCancelled();
-	} catch ( error ) {
-		iframe.remove();
-		throw error;
-	}
-
-	return client;
-}
-
-/**
- * Download the scanner rules and check them against the build's checksum.
- *
- * @param {string} url    Bundle URL.
- * @param {string} sha256 Expected SHA-256, hex.
- * @return {Promise<Uint8Array>} Zip bytes.
- */
-async function fetchBundle( url, sha256 ) {
-	const response = await fetch( url, { credentials: 'same-origin' } );
-	if ( ! response.ok ) {
-		throw new ScanError(
-			__(
-				'The scanner is missing from this copy of the plugin. Reinstall it.',
-				'php-compatibility-checker'
-			)
-		);
-	}
-	const bytes = new Uint8Array( await response.arrayBuffer() );
-
-	// crypto.subtle needs a secure context (HTTPS or localhost).
-	if ( sha256 && window.crypto?.subtle ) {
-		const digest = await window.crypto.subtle.digest( 'SHA-256', bytes );
-		const hex = Array.from( new Uint8Array( digest ) )
-			.map( ( byte ) => byte.toString( 16 ).padStart( 2, '0' ) )
-			.join( '' );
-		if ( hex !== sha256 ) {
-			throw new ScanError(
-				__(
-					'The scanner does not match its checksum. Reinstall the plugin.',
-					'php-compatibility-checker'
-				)
-			);
-		}
-	}
-
-	return bytes;
+export function cancelScans() {
+	controller.abort();
+	controller = new AbortController();
 }
 
 /**
  * Scan one plugin or theme.
  *
- * @param {Object}                 job      Item: type, slug, name, version, source ("wporg" or "local").
+ * @param {Object}                 job      Item: type, slug, name, version, source.
  * @param {(text: string) => void} onStatus Called with progress text.
- * @return {Promise<{report: Object, source: string}>} Report and where the code came from.
+ * @return {Promise<{report: Object, source: string, fingerprint: string, cached: boolean}>} Result.
  */
 export async function scanItem( job, onStatus = () => {} ) {
-	// End-to-end tests replace the runtime, so they don't depend on the network.
+	// End-to-end tests replace the scanner with fixtures.
 	if ( 'function' === typeof window.phpcompatTestScanner ) {
 		return window.phpcompatTestScanner( job, { onStatus, ScanError } );
 	}
 
-	const client = await getEngine( onStatus );
-	const dir = `/pcc/scan/${ job.type }-${ job.slug }`;
-	let source = '';
-	let scanDir = dir;
-
-	await runPhp(
-		client,
-		`pcc_rm( ${ phpString( dir ) } );
-		mkdir( ${ phpString( dir ) }, 0777, true );
-		echo json_encode( true );`
-	);
-
-	// The exact version from WordPress.org, when it's there. Anything else
-	// (premium, custom, or a version WordPress.org doesn't have) is read
-	// from this site.
-	if ( 'wporg' === job.source ) {
-		onStatus(
-			__( 'Downloading from WordPress.org…', 'php-compatibility-checker' )
-		);
-		const zip = await fetchWporgZip( job );
-		if ( zip ) {
-			await client.writeFile( `${ dir }.zip`, zip );
-			const root = await runPhp(
-				client,
-				`$zip = new ZipArchive();
-				if ( true !== $zip->open( ${ phpString( dir + '.zip' ) } ) || ! $zip->extractTo( ${ phpString( dir ) } ) ) { throw new RuntimeException( 'The download from WordPress.org is damaged. Scan again.' ); }
-				$zip->close();
-				$php = 0;
-				foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( ${ phpString( dir ) }, FilesystemIterator::SKIP_DOTS ) ) as $f ) { if ( 'php' === strtolower( $f->getExtension() ) ) { $php++; } }
-				if ( ! $php ) { throw new RuntimeException( 'The download from WordPress.org has no PHP files. Scan again.' ); }
-				unlink( ${ phpString( dir + '.zip' ) } );
-				$top = array_values( array_diff( scandir( ${ phpString(
-					dir
-				) } ), array( '.', '..' ) ) );
-				echo json_encode( 1 === count( $top ) && is_dir( ${ phpString(
-					dir
-				) } . '/' . $top[0] ) ? $top[0] : '' );`
-			);
-			scanDir = root ? `${ dir }/${ root }` : dir;
-			source = 'wporg';
-		}
-	}
-
-	let skipped = [];
-	let skippedCount = 0;
-	if ( ! source ) {
-		( { skipped, skippedCount } = await copyLocalFiles(
-			client,
-			job,
-			dir,
-			onStatus
-		) );
-		source = 'local';
-	}
-
-	onStatus(
-		sprintf(
-			/* translators: %s: list of PHP versions. */
-			__( 'Checking PHP %s…', 'php-compatibility-checker' ),
-			config().phpVersions.join( ', ' )
-		)
-	);
-
-	try {
-		const report = await runPhp(
-			client,
-			`require_once '/pcc/runner.php';
-			echo json_encode( \\WPEngine_PHPCompat\\Bundle\\scan( ${ phpString(
-				scanDir
-			) }, json_decode( ${ phpString(
-				JSON.stringify( config().phpVersions )
-			) }, true ) ) );`
-		);
-		// Files that weren't checked, so a pass isn't overstated.
-		report.skipped = skipped;
-		report.skipped_count = skippedCount;
-		return { report, source };
-	} finally {
-		runPhp(
-			client,
-			`pcc_rm( ${ phpString( dir ) } );
-			echo json_encode( true );`
-		).catch( () => {} );
-	}
-}
-
-/**
- * The item's exact version from WordPress.org, or null if it isn't there.
- *
- * @param {Object} job Item.
- * @return {Promise<Uint8Array|null>} Zip bytes.
- */
-async function fetchWporgZip( job ) {
-	if (
-		! /^[a-z0-9-]+$/.test( job.slug ) ||
-		! /^[0-9A-Za-z.+-]+$/.test( job.version )
-	) {
-		return null;
-	}
-	let response;
-	try {
-		response = await fetch(
-			`https://downloads.wordpress.org/${ job.type }/${ job.slug }.${ job.version }.zip`,
-			{ credentials: 'omit' }
-		);
-	} catch {
-		throw new ScanError(
-			__(
-				'Could not download from WordPress.org. Check your internet connection, and that a firewall or browser extension is not blocking downloads.wordpress.org, then scan again.',
-				'php-compatibility-checker'
-			)
-		);
-	}
-	if ( 404 === response.status ) {
-		return null;
-	}
-	if ( ! response.ok ) {
-		throw new ScanError(
-			sprintf(
-				/* translators: %d: HTTP status code. */
-				__(
-					'WordPress.org returned HTTP %d. Scan again in a few minutes.',
-					'php-compatibility-checker'
-				),
-				response.status
-			)
-		);
-	}
-	return new Uint8Array( await response.arrayBuffer() );
-}
-
-/**
- * Copy an item's PHP files from this site into the runtime, one batch at a time.
- *
- * @param {Object}                 client   Playground client.
- * @param {Object}                 job      Item.
- * @param {string}                 dir      Destination directory.
- * @param {(text: string) => void} onStatus Progress callback.
- */
-async function copyLocalFiles( client, job, dir, onStatus ) {
-	let cursor = 0;
-	let copied = 0;
-	let skipped = [];
-	let truncated = false;
-
-	do {
-		const batch = await apiFetch( {
-			path: `/php-compat/v1/files?type=${ encodeURIComponent(
-				job.type
-			) }&slug=${ encodeURIComponent( job.slug ) }&cursor=${ cursor }`,
-		} ).catch( ( error ) => {
-			throw new ScanError(
-				error?.message ||
-					__(
-						"Could not read this plugin's or theme's files.",
-						'php-compatibility-checker'
-					)
-			);
-		} );
-
-		copied += batch.files.length;
-		if ( 0 === cursor ) {
-			skipped = batch.skipped || [];
-			truncated = !! batch.truncated;
-		}
-		onStatus(
-			sprintf(
-				/* translators: 1: files copied, 2: total files. */
-				__(
-					'Reading files from this site: %1$d of %2$d…',
-					'php-compatibility-checker'
-				),
-				copied,
-				batch.total
-			)
-		);
-
-		// One write per batch; PHP unpacks it. Paths are re-checked inside.
-		await client.writeFile(
-			`${ dir }.batch.json`,
-			new TextEncoder().encode( JSON.stringify( batch.files ) )
-		);
-		await runPhp(
-			client,
-			`$dir = ${ phpString( dir ) };
-			$batch = json_decode( file_get_contents( $dir . '.batch.json' ), true );
-			unlink( $dir . '.batch.json' );
-			foreach ( $batch as $file ) {
-				$path = str_replace( '\\\\', '/', (string) $file['path'] );
-				if ( '' === $path || '/' === $path[0] || preg_match( '#(^|/)\\.\\.(/|$)#', $path ) ) { continue; }
-				$target = $dir . '/' . $path;
-				if ( ! is_dir( dirname( $target ) ) ) { mkdir( dirname( $target ), 0777, true ); }
-				file_put_contents( $target, base64_decode( $file['content'] ) );
+	const { signal } = controller;
+	for ( let restarts = 0; ; restarts++ ) {
+		try {
+			return await scanOnce( job, onStatus, signal );
+		} catch ( error ) {
+			if (
+				error instanceof BatchError &&
+				'phpcompat_files_changed' === error.code &&
+				restarts < MAX_RESTARTS
+			) {
+				continue;
 			}
-			echo json_encode( true );`
-		);
+			throw toScanError( error, signal );
+		}
+	}
+}
 
-		cursor = batch.next;
-	} while ( null !== cursor && undefined !== cursor );
+/**
+ * One pass over an item's files: a plan request, then batches.
+ *
+ * @param {Object}                 job      Item.
+ * @param {(text: string) => void} onStatus Progress callback.
+ * @param {AbortSignal}            signal   Cancels the scan.
+ * @return {Promise<Object>} Result (see scanItem()).
+ */
+async function scanOnce( job, onStatus, signal ) {
+	const item = { type: job.type, slug: job.slug };
+	let failures = 0;
 
-	if ( ! copied ) {
+	// Wait out a failure that may pass (busy site, dropped connection), or
+	// give up: on errors retrying can't fix, and after MAX_FAILURES in a row.
+	const waitOrThrow = async ( error ) => {
+		if ( ! ( error instanceof BatchError ) || 'fatal' === error.kind ) {
+			throw error;
+		}
+		if ( ++failures > MAX_FAILURES ) {
+			throw new ScanError(
+				sprintf(
+					/* translators: %s: last error message. */
+					__(
+						'This site stopped responding to the scan (%s). Try again later, or scan with WP-CLI: wp php-compat scan.',
+						'php-compatibility-checker'
+					),
+					error.message
+				)
+			);
+		}
+		await sleep( backoff( failures, error.retryAfter ), signal );
+	};
+
+	// Plan: the stored result if nothing changed, otherwise the file count.
+	let plan;
+	while ( ! plan ) {
+		try {
+			plan = await postBatch( { ...item, cursor: 0, limit: 0 }, signal );
+		} catch ( error ) {
+			await waitOrThrow( error );
+		}
+	}
+	failures = 0;
+
+	if ( plan.cached && plan.result ) {
+		return {
+			report: plan.result.report,
+			source: plan.result.source || 'local',
+			fingerprint: plan.result.fingerprint || '',
+			cached: true,
+		};
+	}
+
+	const total = plan.total || 0;
+	const fingerprint = plan.fingerprint || '';
+	const report = { compatible: [], incompatible: [], versions: {} };
+	// A host can answer with a whole report (wpephpcompat_pre_scan_report).
+	mergeReport( report, plan.report || {} );
+
+	if ( ! total && ! Object.keys( report.versions ).length ) {
 		throw new ScanError(
 			__(
 				'No PHP files were found to check.',
@@ -420,95 +199,395 @@ async function copyLocalFiles( client, job, dir, onStatus ) {
 		);
 	}
 
-	// Past the file limit, the count of what wasn't sent is unknown: count it as one.
-	return { skipped, skippedCount: skipped.length + ( truncated ? 1 : 0 ) };
+	// Files that crash the scan on their own are skipped, but only a few: past
+	// that, something is wrong with the site, and a pass would mean nothing.
+	const maxCrashes = Math.max( 5, Math.ceil( total * 0.1 ) );
+	const crashed = [];
+	let cursor = plan.next;
+	let nextPath = plan.next_path || '';
+	let checked = 0;
+	let fileFailures = 0;
+
+	const status = () =>
+		onStatus(
+			sprintf(
+				/* translators: 1: files checked, 2: total files. */
+				__(
+					'Checking files: %1$d of %2$d…',
+					'php-compatibility-checker'
+				),
+				checked,
+				total
+			)
+		);
+	if ( total ) {
+		status();
+	}
+
+	while ( null !== cursor && undefined !== cursor ) {
+		const limit = batchSize;
+		const started = Date.now();
+		let response;
+
+		try {
+			response = await postBatch(
+				{ ...item, cursor, limit, fingerprint },
+				signal
+			);
+		} catch ( error ) {
+			if ( ! ( error instanceof BatchError ) || 'batch' !== error.kind ) {
+				await waitOrThrow( error );
+				continue;
+			}
+			if ( limit > 1 ) {
+				// Too much for one request: split it.
+				batchSize = Math.max( 1, Math.floor( limit / 2 ) );
+			} else if ( ++fileFailures >= FILE_ATTEMPTS ) {
+				// This one file breaks the scan on its own: skip it, keep going.
+				crashed.push(
+					nextPath ||
+						sprintf(
+							/* translators: %d: file number. */
+							__( 'PHP file #%d', 'php-compatibility-checker' ),
+							cursor + 1
+						)
+				);
+				if ( crashed.length > maxCrashes ) {
+					throw new ScanError(
+						sprintf(
+							/* translators: 1: number of files, 2: last error message. */
+							__(
+								'%1$d files could not be checked because the scan stopped on each of them (%2$s). This is usually a memory or time limit on the server. Try again later, or scan with WP-CLI: wp php-compat scan.',
+								'php-compatibility-checker'
+							),
+							crashed.length,
+							error.message
+						)
+					);
+				}
+				fileFailures = 0;
+				cursor = cursor + 1 < total ? cursor + 1 : null;
+				nextPath = '';
+				continue;
+			}
+			await sleep( backoff( 1 ), signal );
+			continue;
+		}
+
+		failures = 0;
+		fileFailures = 0;
+		batchSize = nextBatchSize( limit, Date.now() - started );
+		checked += response.scanned || 0;
+		mergeReport( report, response.report || {} );
+		cursor = response.next;
+		nextPath = response.next_path || '';
+		status();
+	}
+
+	finishReport( report, config().phpVersions || [] );
+	// Files that weren't checked, so a pass isn't overstated. Past the file
+	// limit, how many weren't listed is unknown: count it as one.
+	report.skipped = [ ...( plan.skipped || [] ), ...crashed ];
+	report.skipped_count = report.skipped.length + ( plan.truncated ? 1 : 0 );
+	// What its Composer dependencies require, to compare with "Requires PHP".
+	report.platform_php = plan.platform_php || '';
+
+	return { report, source: 'local', fingerprint, cached: false };
 }
 
 /**
- * Run PHP code and decode the JSON it echoes.
+ * The next batch size: scaled toward TARGET_MS, at most doubled or halved
+ * per step so one odd request doesn't swing it.
  *
- * @param {Object} client Playground client.
- * @param {string} code   PHP code without the opening tag; must echo JSON.
- * @return {Promise<Object|string|boolean>} Decoded output.
+ * @param {number} limit   Files requested.
+ * @param {number} elapsed Milliseconds the request took.
+ * @return {number} Files to request next.
  */
-async function runPhp( client, code ) {
-	const response = await client.run( {
-		code: `<?php
-ini_set( 'memory_limit', '-1' );
-ini_set( 'display_errors', '0' );
-set_time_limit( 0 );
-function pcc_rm( $dir ) {
-	if ( ! is_dir( $dir ) ) { return; }
-	foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS ), RecursiveIteratorIterator::CHILD_FIRST ) as $file ) {
-		$file->isDir() ? rmdir( $file->getPathname() ) : unlink( $file->getPathname() );
-	}
-	rmdir( $dir );
+export function nextBatchSize( limit, elapsed ) {
+	const ideal = Math.round( ( limit * TARGET_MS ) / Math.max( elapsed, 1 ) );
+	const bounded = Math.min(
+		limit * 2,
+		Math.max( Math.floor( limit / 2 ), ideal )
+	);
+	return Math.min( MAX_BATCH, Math.max( 1, bounded ) );
 }
-try {
-${ code }
-} catch ( Throwable $e ) {
-	echo json_encode( array( '__error' => $e->getMessage() ) );
-}`,
-	} );
 
-	let data;
+/**
+ * Wait before retrying: the server's Retry-After if it gave one, otherwise
+ * exponential backoff (1 s, 2 s, 4 s … up to 30 s) with jitter, so retries
+ * don't line up with whatever made the site busy.
+ *
+ * @param {number}       attempt    Failures so far (1 for the first).
+ * @param {number}       retryAfter Seconds the server asked for, or 0.
+ * @param {() => number} random     Random number source (for tests).
+ * @return {number} Milliseconds.
+ */
+export function backoff( attempt, retryAfter = 0, random = Math.random ) {
+	if ( retryAfter > 0 ) {
+		return Math.min( retryAfter, 120 ) * 1000;
+	}
+	const cap = Math.min( 30000, 1000 * 2 ** Math.max( 0, attempt - 1 ) );
+	return Math.round( cap / 2 + random() * ( cap / 2 ) );
+}
+
+/**
+ * POST /scan-batch, classifying failures for the retry logic.
+ *
+ * @param {Object}      data   Request body.
+ * @param {AbortSignal} signal Cancels the request.
+ * @return {Promise<Object>} Response body.
+ */
+async function postBatch( data, signal ) {
+	let response;
 	try {
-		data = JSON.parse( response.text );
+		response = await apiFetch( {
+			path: '/php-compat/v1/scan-batch',
+			method: 'POST',
+			data,
+			signal,
+			parse: false,
+		} );
+	} catch ( thrown ) {
+		if ( 'AbortError' === thrown?.name ) {
+			throw thrown;
+		}
+		// apiFetch rejects with the Response for HTTP errors when parse is false.
+		if ( thrown && 'number' === typeof thrown.status && thrown.headers ) {
+			response = thrown;
+		} else {
+			throw new BatchError(
+				thrown?.message ||
+					__( 'No connection', 'php-compatibility-checker' ),
+				{ kind: 'busy' }
+			);
+		}
+	}
+
+	const text = await response.text().catch( () => '' );
+	const body = parseJson( text );
+
+	if ( response.ok && body && 'object' === typeof body ) {
+		return body;
+	}
+
+	throw classify(
+		response.status,
+		body,
+		parseRetryAfter( response.headers?.get?.( 'Retry-After' ) )
+	);
+}
+
+/**
+ * Turn a failed response into a BatchError.
+ *
+ * @param {number}      status     HTTP status.
+ * @param {Object|null} body       Parsed body, or null if it wasn't JSON.
+ * @param {number}      retryAfter Seconds, or 0.
+ * @return {BatchError} Error.
+ */
+export function classify( status, body, retryAfter = 0 ) {
+	const code = body?.code || '';
+	let message = body?.message;
+	if ( ! message && body ) {
+		message = sprintf(
+			/* translators: %d: HTTP status code. */
+			__( 'HTTP %d', 'php-compatibility-checker' ),
+			status
+		);
+	} else if ( ! message ) {
+		message = sprintf(
+			/* translators: %d: HTTP status code. */
+			__(
+				'the site sent back a web page instead of a scan result, HTTP %d',
+				'php-compatibility-checker'
+			),
+			status
+		);
+	}
+
+	let kind = 'fatal';
+	if ( FATAL_CODES.includes( code ) || [ 401, 403 ].includes( status ) ) {
+		// Retrying won't help: logged out, blocked, missing scanner, or files
+		// changed (scanItem() starts the item again for that one).
+		kind = 'fatal';
+	} else if ( [ 408, 425, 429, 503 ].includes( status ) ) {
+		kind = 'busy';
+	} else if ( status >= 500 || ! body || 'phpcompat_scan_failed' === code ) {
+		// A timeout, a PHP fatal (often memory), or a page that isn't JSON:
+		// the batch was too much. Smaller batches find the file causing it.
+		kind = 'batch';
+	}
+
+	return new BatchError( message, { status, code, kind, retryAfter } );
+}
+
+/**
+ * JSON from a response, even when a PHP notice was printed before it.
+ *
+ * @param {string} text Response text.
+ * @return {Object|null} Parsed JSON, or null.
+ */
+export function parseJson( text ) {
+	if ( ! text ) {
+		return null;
+	}
+	try {
+		return JSON.parse( text );
 	} catch {
-		throw new ScanError(
-			sprintf(
-				/* translators: %s: error output. */
-				__(
-					'The scanner stopped unexpectedly: %s',
-					'php-compatibility-checker'
-				),
-				( response.errors || response.text || '' ).slice( 0, 300 )
+		const start = text.indexOf( '{"' );
+		if ( start > 0 ) {
+			try {
+				return JSON.parse( text.slice( start ) );
+			} catch {}
+		}
+		return null;
+	}
+}
+
+/**
+ * @param {string|null} value Retry-After header: seconds or an HTTP date.
+ * @return {number} Seconds, or 0.
+ */
+function parseRetryAfter( value ) {
+	if ( ! value ) {
+		return 0;
+	}
+	const seconds = Number( value );
+	if ( Number.isFinite( seconds ) ) {
+		return Math.max( 0, seconds );
+	}
+	const date = Date.parse( value );
+	return Number.isNaN( date )
+		? 0
+		: Math.max( 0, Math.ceil( ( date - Date.now() ) / 1000 ) );
+}
+
+/**
+ * A message for people from whatever went wrong.
+ *
+ * @param {Error}       error  Error.
+ * @param {AbortSignal} signal The scan's signal.
+ * @return {ScanError} Error to show.
+ */
+function toScanError( error, signal ) {
+	if ( signal.aborted || 'AbortError' === error?.name ) {
+		return new ScanError(
+			__( 'The scan was cancelled.', 'php-compatibility-checker' ),
+			'skipped'
+		);
+	}
+	if ( error instanceof ScanError ) {
+		return error;
+	}
+	if (
+		error instanceof BatchError &&
+		'phpcompat_files_changed' === error.code
+	) {
+		return new ScanError(
+			__(
+				"This plugin's or theme's files kept changing during the scan. Scan again when updates have finished.",
+				'php-compatibility-checker'
 			)
 		);
 	}
-	if ( data && data.__error ) {
-		throw new ScanError(
+	if (
+		error instanceof BatchError &&
+		[ 401, 403 ].includes( error.status )
+	) {
+		return new ScanError(
 			sprintf(
 				/* translators: %s: error message. */
 				__(
-					'The scanner stopped unexpectedly: %s',
+					'%s Reload the page (you may have been logged out), then scan again.',
 					'php-compatibility-checker'
 				),
-				data.__error
+				error.message
 			)
 		);
 	}
-	return data;
+	return new ScanError(
+		error?.message || __( 'The scan failed.', 'php-compatibility-checker' )
+	);
 }
 
 /**
- * A PHP single-quoted string literal.
- *
- * @param {string} value Value.
- * @return {string} PHP literal.
+ * @param {number}      ms     Milliseconds.
+ * @param {AbortSignal} signal Ends the wait early (rejects).
+ * @return {Promise<void>} Resolves after the wait.
  */
-export function phpString( value ) {
-	return `'${ String( value ).replace( /\\/g, '\\\\' ).replace( /'/g, "\\'" ) }'`;
+function sleep( ms, signal ) {
+	return new Promise( ( resolve, reject ) => {
+		if ( signal.aborted ) {
+			reject( new DOMException( 'Aborted', 'AbortError' ) );
+			return;
+		}
+		const timer = setTimeout( done, ms );
+		function done() {
+			signal.removeEventListener( 'abort', abort );
+			resolve();
+		}
+		function abort() {
+			clearTimeout( timer );
+			reject( new DOMException( 'Aborted', 'AbortError' ) );
+		}
+		signal.addEventListener( 'abort', abort, { once: true } );
+	} );
 }
 
-function withTimeout( promise, ms ) {
-	return Promise.race( [
-		promise,
-		new Promise( ( resolve, reject ) =>
-			setTimeout( () => reject( new Error( 'timeout' ) ), ms )
-		),
-	] );
+/**
+ * Add one batch's report. Batches cover different files, so files are
+ * disjoint and totals add up.
+ *
+ * @param {Object} into Merged report (changed).
+ * @param {Object} part Batch report.
+ */
+export function mergeReport( into, part ) {
+	Object.entries( part.versions || {} ).forEach( ( [ version, data ] ) => {
+		const merged = ( into.versions[ version ] ||= {
+			totals: { errors: 0, warnings: 0 },
+			files: {},
+		} );
+		merged.totals.errors += data?.totals?.errors || 0;
+		merged.totals.warnings += data?.totals?.warnings || 0;
+		Object.assign( merged.files, data?.files || {} );
+	} );
+}
+
+/**
+ * Fill in compatible and incompatible: a version is incompatible if any
+ * batch found an error in it.
+ *
+ * @param {Object}   report   Merged report (changed).
+ * @param {string[]} versions Versions checked.
+ */
+export function finishReport( report, versions ) {
+	versions.forEach( ( version ) => {
+		report.versions[ version ] ||= {
+			totals: { errors: 0, warnings: 0 },
+			files: {},
+		};
+	} );
+	report.compatible = [];
+	report.incompatible = [];
+	Object.keys( report.versions ).forEach( ( version ) => {
+		report[
+			report.versions[ version ].totals.errors
+				? 'incompatible'
+				: 'compatible'
+		].push( version );
+	} );
 }
 
 /**
  * Store a result on the site, so later visits, WP-CLI, and the Abilities API can use it.
  *
- * @param {Object} job    Item.
- * @param {Object} report Report.
- * @param {string} source "wporg" or "local".
+ * @param {Object} job         Item.
+ * @param {Object} report      Report.
+ * @param {string} source      "wporg" or "local".
+ * @param {string} fingerprint Fingerprint of the files scanned, so an unchanged item isn't rescanned.
  * @return {Promise<Object|null>} Stored result, or null if it couldn't be saved.
  */
-export function saveResult( job, report, source ) {
+export function saveResult( job, report, source, fingerprint = '' ) {
 	return apiFetch( {
 		path: '/php-compat/v1/results',
 		method: 'POST',
@@ -518,6 +597,7 @@ export function saveResult( job, report, source ) {
 			version: job.version,
 			ruleset: config().ruleset,
 			source,
+			fingerprint,
 			report: trimReport( report ),
 		},
 	} ).catch( ( error ) => {

@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Runs real PHPCompatibilityWP scans on a fixture plugin. The same runner runs
- * in the browser (PHP WebAssembly) and under WP-CLI.
+ * for the scan page (in batches) and under WP-CLI.
  */
 class RunnerTest extends TestCase {
 
@@ -69,5 +69,70 @@ class RunnerTest extends TestCase {
 		$report = Bundle\scan( __DIR__ . '/fixtures/sample-plugin/includes/legacy.php', array( '8.0' ) );
 
 		$this->assertSame( array( 'legacy.php' ), array_keys( $report['versions']['8.0']['files'] ) );
+	}
+
+	public function test_batches_scan_only_the_given_files() {
+		$base   = __DIR__ . '/fixtures/sample-plugin';
+		$report = Bundle\scan_files( $base, array( 'includes/legacy.php', '../RunnerTest.php' ), array( '8.0' ) );
+
+		// Paths outside the base are ignored; the given file is reported relative to it.
+		$this->assertSame( array( 'includes/legacy.php' ), array_keys( $report['versions']['8.0']['files'] ) );
+		$this->assertSame( array( '8.0' ), $report['incompatible'] );
+	}
+
+	public function test_files_that_are_not_utf8_are_still_reported() {
+		$dir = sys_get_temp_dir() . '/pcc-latin1-' . uniqid();
+		mkdir( $dir );
+		// Latin-1 bytes ("été") inside an ASP-style tag, which the sniff quotes, plus a removed function.
+		file_put_contents( $dir . '/legacy.php', "<?php\n\$link = mysql_connect( 'localhost' );\n?>\n<%= \"\xE9t\xE9\" %>\n" );
+
+		try {
+			$report = Bundle\scan( $dir, array( '7.4' ) );
+		} finally {
+			unlink( $dir . '/legacy.php' );
+			rmdir( $dir );
+		}
+
+		$messages = $report['versions']['7.4']['files']['legacy.php']['messages'];
+		$sources  = array_column( $messages, 'source' );
+		$this->assertContains( 'PHPCompatibility.Extensions.RemovedExtensions.mysql_DeprecatedRemoved', $sources );
+		$this->assertSame( array( '7.4' ), $report['incompatible'] );
+		foreach ( $messages as $message ) {
+			$this->assertTrue( (bool) preg_match( '//u', $message['message'] ), 'Messages are valid UTF-8.' );
+		}
+		$this->assertNotFalse( json_encode( $report ) );
+	}
+
+	public function test_historical_false_positives_stay_fixed() {
+		$dir = sys_get_temp_dir() . '/pcc-history-' . uniqid();
+		mkdir( $dir );
+		// Upstream issues #79/#139 (mysql_to_rfc3339 is a WordPress function), #141 (hash_equals is polyfilled by WordPress).
+		file_put_contents( $dir . '/ok.php', "<?php\n\$date = mysql_to_rfc3339( '2020-01-01 00:00:00' );\n\$same = hash_equals( 'a', 'b' );\n" );
+
+		try {
+			$report = Bundle\scan( $dir, array( '7.4', '8.5' ) );
+		} finally {
+			unlink( $dir . '/ok.php' );
+			rmdir( $dir );
+		}
+
+		$this->assertSame( array( '7.4', '8.5' ), $report['compatible'] );
+		$this->assertSame( array(), $report['versions']['8.5']['files'] );
+	}
+
+	public function test_phpcs_ignore_annotations_are_honored() {
+		$dir = sys_get_temp_dir() . '/pcc-ignore-' . uniqid();
+		mkdir( $dir );
+		// Upstream issues #215/#223: version-guarded code can opt out of a check.
+		file_put_contents( $dir . '/guarded.php', "<?php\nif ( function_exists( 'each' ) ) {\n\t\$x = each( \$arr ); // phpcs:ignore PHPCompatibility\n}\n" );
+
+		try {
+			$report = Bundle\scan( $dir, array( '8.0' ) );
+		} finally {
+			unlink( $dir . '/guarded.php' );
+			rmdir( $dir );
+		}
+
+		$this->assertSame( array( '8.0' ), $report['compatible'] );
 	}
 }

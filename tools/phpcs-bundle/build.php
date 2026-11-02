@@ -1,10 +1,13 @@
 <?php
 /**
- * Zip PHP_CodeSniffer and PHPCompatibilityWP for the browser scanner.
+ * Copy PHP_CodeSniffer and PHPCompatibilityWP into the plugin for the scanner.
  *
- * Writes plugin/build/phpcs-bundle.zip and plugin/build/phpcs-bundle.json
- * (rule set versions, used to key cached results, and the zip's SHA-256,
- * checked by the browser before it runs anything).
+ * Writes plugin/build/scanner/ (runner.php plus the vendor files phpcs loads)
+ * and plugin/build/scanner.json (rule set, used to key stored results, plus
+ * package versions, the file list, and a SHA-256 over every file).
+ *
+ * Plain files, not an archive: WordPress.org doesn't accept compressed or
+ * phar files in plugins (Plugin Check's File_Type_Check).
  *
  * Run `composer install --no-dev` in this directory first (npm run build:phpcs
  * does both).
@@ -15,7 +18,8 @@
 // phpcs:disable WordPress.WP.AlternativeFunctions -- Build script, runs outside WordPress.
 
 $root   = __DIR__ . '/vendor';
-$out    = dirname( __DIR__, 2 ) . '/plugin/build';
+$build  = dirname( __DIR__, 2 ) . '/plugin/build';
+$out    = $build . '/scanner';
 $lock   = json_decode( (string) file_get_contents( __DIR__ . '/composer.lock' ), true );
 $needed = array(
 	'squizlabs/php_codesniffer',
@@ -35,57 +39,69 @@ foreach ( $lock['packages'] as $package ) {
 	$versions[ $package['name'] ] = $package['version'];
 }
 
-if ( ! is_dir( $out ) ) {
-	mkdir( $out, 0755, true );
-}
-
-$zip_path = $out . '/phpcs-bundle.zip';
-if ( file_exists( $zip_path ) ) {
-	unlink( $zip_path );
-}
-
-$zip = new ZipArchive();
-if ( true !== $zip->open( $zip_path, ZipArchive::CREATE ) ) {
-	fwrite( STDERR, "Could not create $zip_path\n" );
-	exit( 1 );
+// Start clean, so files removed upstream don't linger.
+if ( is_dir( $out ) ) {
+	$old = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $out, FilesystemIterator::SKIP_DOTS ), RecursiveIteratorIterator::CHILD_FIRST );
+	foreach ( $old as $item ) {
+		$item->isDir() ? rmdir( $item->getPathname() ) : unlink( $item->getPathname() );
+	}
+	rmdir( $out );
 }
 
 $files = array();
 foreach ( $needed as $package ) {
-	$dir      = $root . '/' . $package;
-	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $dir, FilesystemIterator::SKIP_DOTS ) );
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root . '/' . $package, FilesystemIterator::SKIP_DOTS ) );
 	foreach ( $iterator as $file ) {
 		$relative = substr( $file->getPathname(), strlen( $root ) + 1 );
-		// Only what phpcs loads at runtime.
-		if ( preg_match( '#/(tests?|docs?|\.github)/#i', $relative ) || ! preg_match( '/\.(php|xml|conf)$/', $relative ) ) {
+		// Each package's license, which BSD-3 and LGPL require shipping with it.
+		$is_license = (bool) preg_match( '#^[^/]+/[^/]+/(LICEN[CS]E|COPYING)[^/]*$#i', $relative );
+		// Otherwise only what phpcs loads at runtime. phpcs's git filters shell
+		// out to git; the scanner never uses them, and Plugin Check flags exec().
+		if ( ! $is_license && ( preg_match( '#/(tests?|docs?|\.github)/#i', $relative ) || preg_match( '#/src/Filters/Git(Modified|Staged)\.php$#', $relative ) || ! preg_match( '/\.(php|xml|conf)$/', $relative ) ) ) {
 			continue;
 		}
-		$files[] = $relative;
+		$files[ 'vendor/' . $relative ] = $file->getPathname();
 	}
 }
+$files['runner.php']         = __DIR__ . '/runner.php';
+$files['collect-report.php'] = __DIR__ . '/collect-report.php';
+ksort( $files );
 
-// Stable order and timestamps, so the same inputs give the same zip.
-sort( $files );
-foreach ( $files as $relative ) {
-	$zip->addFile( $root . '/' . $relative, 'vendor/' . $relative );
-	$zip->setMtimeName( 'vendor/' . $relative, 315532800 );
+$hash = hash_init( 'sha256' );
+foreach ( $files as $relative => $source ) {
+	$target = $out . '/' . $relative;
+	if ( ! is_dir( dirname( $target ) ) ) {
+		mkdir( dirname( $target ), 0755, true );
+	}
+	copy( $source, $target );
+	hash_update( $hash, $relative . "\0" . hash_file( 'sha256', $source ) . "\n" );
 }
-$zip->addFile( __DIR__ . '/runner.php', 'runner.php' );
-$zip->setMtimeName( 'runner.php', 315532800 );
-$zip->close();
+
+// The files only run when the plugin includes them; don't serve them over the web.
+file_put_contents( $out . '/.htaccess', "Require all denied\n" );
+file_put_contents( $out . '/index.php', "<?php\n// Silence is golden.\n" );
 
 $manifest = array(
-	'ruleset' => sprintf(
+	'ruleset'  => sprintf(
 		'phpcs-%s+phpcompatibility-%s+wp-%s',
 		$versions['squizlabs/php_codesniffer'],
 		$versions['phpcompatibility/php-compatibility'],
 		$versions['phpcompatibility/phpcompatibility-wp']
 	),
 	'packages' => array_intersect_key( $versions, array_flip( $needed ) ),
-	'sha256'   => hash_file( 'sha256', $zip_path ),
-	'files'    => count( $files ),
+	'sha256'   => hash_final( $hash ),
+	// Lets the plugin check its copy is complete (Scanner_Bundle::verify()).
+	'files'    => array_keys( $files ),
 );
 
-file_put_contents( $out . '/phpcs-bundle.json', json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n" );
+file_put_contents( $build . '/scanner.json', json_encode( $manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n" );
 
-printf( "phpcs-bundle.zip: %d files, %.1f KB, %s\n", $manifest['files'], filesize( $zip_path ) / 1024, $manifest['ruleset'] );
+// Remove the archive older builds wrote.
+foreach ( array( 'phpcs-bundle.zip', 'phpcs-bundle.json' ) as $legacy ) {
+	if ( file_exists( $build . '/' . $legacy ) ) {
+		unlink( $build . '/' . $legacy );
+	}
+}
+
+$bytes = array_sum( array_map( 'filesize', $files ) );
+printf( "build/scanner: %d files, %.1f MB, %s\n", count( $files ), $bytes / 1048576, $manifest['ruleset'] );

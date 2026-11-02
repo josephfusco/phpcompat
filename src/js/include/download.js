@@ -66,9 +66,9 @@ export function reportMeta( items ) {
 		generator: 'PHP Compatibility Checker',
 		generated_at: new Date().toISOString(),
 		site: checkerList.site || { url: window.location.origin },
-		source: `PHPCompatibilityWP (${
-			checkerList.scanner?.ruleset || 'WordPress Playground'
-		})`,
+		source:
+			checkerList.scanner?.tools ||
+			`PHPCompatibilityWP (${ checkerList.scanner?.ruleset || '' })`,
 		scope: globalThis.phpcompat?.scope || 'yes',
 		max_php_checked: maxPhp,
 		summary,

@@ -10,12 +10,15 @@ declare( strict_types=1 );
 namespace WPEngine_PHPCompat;
 
 /**
- * Describes build/phpcs-bundle.zip and runs it natively for WP-CLI.
+ * Describes build/scanner/ and runs it in this PHP process.
  *
- * In wp-admin the zip runs in the browser on PHP WebAssembly (WordPress
- * Playground), so scanning costs the server nothing. WP-CLI has no browser
- * and no time limit, so it unpacks the same zip to a temporary directory and
- * runs the same runner.php in-process.
+ * The same files run in two places, so results are identical:
+ * - from the scan page, a few files per request (Rest_Controller::scan_batch()),
+ *   so each request stays short on shared hosts;
+ * - under WP-CLI, which has no request time limit.
+ *
+ * They're plain PHP files in the plugin, not an archive, because WordPress.org
+ * doesn't accept compressed files in plugins.
  */
 class Scanner_Bundle {
 
@@ -28,7 +31,16 @@ class Scanner_Bundle {
 	const PHP_VERSIONS = array( '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5' );
 
 	/**
-	 * Build manifest (ruleset, package versions, sha256).
+	 * Directory holding runner.php and vendor/.
+	 *
+	 * @return string
+	 */
+	public static function dir(): string {
+		return WPEPHPCOMPAT_PLUGIN_DIR . 'build/scanner';
+	}
+
+	/**
+	 * Build manifest: ruleset, package versions, file list, and a sha256 over every file.
 	 *
 	 * @return array
 	 */
@@ -36,7 +48,7 @@ class Scanner_Bundle {
 		static $manifest = null;
 
 		if ( null === $manifest ) {
-			$file     = WPEPHPCOMPAT_PLUGIN_DIR . 'build/phpcs-bundle.json';
+			$file     = WPEPHPCOMPAT_PLUGIN_DIR . 'build/scanner.json';
 			$data     = is_readable( $file ) ? json_decode( (string) file_get_contents( $file ), true ) : null; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file.
 			$manifest = is_array( $data ) ? $data : array();
 		}
@@ -55,122 +67,120 @@ class Scanner_Bundle {
 	}
 
 	/**
-	 * Settings the browser scanner needs.
+	 * The tools and versions, for people: "PHPCompatibilityWP 3.0.0 (PHPCompatibility 10.0.0, PHP_CodeSniffer 4.0.4)".
 	 *
-	 * @return array
+	 * @return string
 	 */
-	public static function browser_config(): array {
-		$manifest = self::manifest();
+	public static function tools(): string {
+		$packages = (array) ( self::manifest()['packages'] ?? array() );
+		$version  = static function ( $name ) use ( $packages ) {
+			return isset( $packages[ $name ] ) ? (string) $packages[ $name ] : '';
+		};
 
-		return array(
-			'bundleUrl'   => plugins_url( 'build/phpcs-bundle.zip', WPEPHPCOMPAT_PLUGIN_FILE ),
-			'sha256'      => isset( $manifest['sha256'] ) ? (string) $manifest['sha256'] : '',
-			'ruleset'     => self::ruleset(),
-			'phpVersions' => self::PHP_VERSIONS,
-			'remoteUrl'   => self::playground_remote_url(),
+		if ( '' === $version( 'phpcompatibility/phpcompatibility-wp' ) ) {
+			return 'PHPCompatibilityWP (' . self::ruleset() . ')';
+		}
+
+		return sprintf(
+			'PHPCompatibilityWP %1$s (PHPCompatibility %2$s, PHP_CodeSniffer %3$s)',
+			$version( 'phpcompatibility/phpcompatibility-wp' ),
+			$version( 'phpcompatibility/php-compatibility' ),
+			$version( 'squizlabs/php_codesniffer' )
 		);
 	}
 
 	/**
-	 * Where the PHP WebAssembly runtime comes from.
+	 * Whether this copy of the scanner is complete and unchanged: every file
+	 * in the build manifest is there and the SHA-256 over them matches. The
+	 * check reads about 5 MB, so its result is kept for a day per build.
 	 *
-	 * @return string
+	 * @return bool
 	 */
-	public static function playground_remote_url(): string {
-		/**
-		 * Filters the WordPress Playground remote URL used to run scans in the browser.
-		 *
-		 * Point this at a self-hosted Playground to keep scans off playground.wordpress.net.
-		 *
-		 * @since 1.7.0
-		 *
-		 * @param string $url Playground remote.html URL.
-		 */
-		return (string) apply_filters( 'wpephpcompat_playground_remote_url', 'https://playground.wordpress.net/remote.html' );
+	public static function verify(): bool {
+		$manifest = self::manifest();
+		$expected = isset( $manifest['sha256'] ) ? (string) $manifest['sha256'] : '';
+		$files    = isset( $manifest['files'] ) && is_array( $manifest['files'] ) ? $manifest['files'] : array();
+
+		if ( '' === $expected || ! $files ) {
+			return false;
+		}
+
+		$key = 'wpephpcompat_scanner_ok';
+		if ( get_transient( $key ) === $expected ) {
+			return true;
+		}
+
+		$hash = hash_init( 'sha256' );
+		foreach ( $files as $relative ) {
+			$file = self::dir() . '/' . $relative;
+			if ( ! is_readable( $file ) ) {
+				return false;
+			}
+			hash_update( $hash, $relative . "\0" . hash_file( 'sha256', $file ) . "\n" );
+		}
+
+		if ( ! hash_equals( $expected, hash_final( $hash ) ) ) {
+			return false;
+		}
+
+		set_transient( $key, $expected, DAY_IN_SECONDS );
+		return true;
 	}
 
 	/**
-	 * Scan a directory with the bundled scanner, in this PHP process.
+	 * Settings the scan page needs.
 	 *
-	 * @param string   $dir      Directory to scan.
+	 * @return array
+	 */
+	public static function browser_config(): array {
+		return array(
+			'ruleset'     => self::ruleset(),
+			'tools'       => self::tools(),
+			'phpVersions' => self::PHP_VERSIONS,
+		);
+	}
+
+	/**
+	 * Scan a directory (or a one-file plugin) in this PHP process.
+	 *
+	 * @param string   $dir      Directory or file to scan.
 	 * @param string[] $versions PHP versions; defaults to PHP_VERSIONS.
 	 * @return array Report (see Results::sanitize_report()).
-	 * @throws \RuntimeException When the bundle can't be unpacked or run.
+	 * @throws \RuntimeException When the scanner is missing.
 	 */
 	public static function scan_directory( string $dir, array $versions = self::PHP_VERSIONS ): array {
-		require_once self::unpack() . '/runner.php';
+		self::load();
 
 		return \WPEngine_PHPCompat\Bundle\scan( $dir, $versions );
 	}
 
 	/**
-	 * Unpack the bundle to a new private temporary directory, once per process.
+	 * Scan some files of a directory in this PHP process.
 	 *
-	 * A fresh, randomly named directory (mode 0700) that only this process
-	 * created, removed when the process ends: a predictable shared path could
-	 * be planted by another user on the same server before we run its code.
-	 *
-	 * @return string Directory containing runner.php and vendor/.
-	 * @throws \RuntimeException When it can't be unpacked.
+	 * @param string   $base     Directory the paths are relative to.
+	 * @param string[] $files    Relative paths.
+	 * @param string[] $versions PHP versions; defaults to PHP_VERSIONS.
+	 * @return array Report for those files.
+	 * @throws \RuntimeException When the scanner is missing.
 	 */
-	private static function unpack(): string {
-		static $dir = null;
-		if ( null !== $dir ) {
-			return $dir;
-		}
+	public static function scan_files( string $base, array $files, array $versions = self::PHP_VERSIONS ): array {
+		self::load();
 
-		$zip_file = WPEPHPCOMPAT_PLUGIN_DIR . 'build/phpcs-bundle.zip';
-		$manifest = self::manifest();
-
-		if ( ! is_readable( $zip_file ) || empty( $manifest['sha256'] ) ) {
-			throw new \RuntimeException( esc_html__( 'The scanner is missing from this copy of the plugin. Reinstall it.', 'php-compatibility-checker' ) );
-		}
-
-		if ( ! hash_equals( (string) $manifest['sha256'], (string) hash_file( 'sha256', $zip_file ) ) ) {
-			throw new \RuntimeException( esc_html__( 'The scanner bundle doesn\'t match its checksum. Reinstall the plugin.', 'php-compatibility-checker' ) );
-		}
-
-		if ( ! class_exists( 'ZipArchive' ) ) {
-			throw new \RuntimeException( esc_html__( 'Scanning from WP-CLI needs PHP\'s zip extension.', 'php-compatibility-checker' ) );
-		}
-
-		$target = rtrim( get_temp_dir(), '/' ) . '/phpcompat-scanner-' . bin2hex( random_bytes( 12 ) );
-
-		// mkdir() fails if anything already exists at the path, so the directory is ours.
-		if ( ! @mkdir( $target, 0700 ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_mkdir
-			throw new \RuntimeException( esc_html__( 'Couldn\'t create a temporary directory for the scanner.', 'php-compatibility-checker' ) );
-		}
-
-		$zip = new \ZipArchive();
-		if ( true !== $zip->open( $zip_file ) || ! $zip->extractTo( $target ) ) {
-			self::remove_directory( $target );
-			throw new \RuntimeException( esc_html__( 'Couldn\'t unpack the scanner to the temporary directory.', 'php-compatibility-checker' ) );
-		}
-		$zip->close();
-
-		register_shutdown_function( array( __CLASS__, 'remove_directory' ), $target );
-		$dir = $target;
-
-		return $dir;
+		return \WPEngine_PHPCompat\Bundle\scan_files( $base, $files, $versions );
 	}
 
 	/**
-	 * Delete a directory this class created.
+	 * Load runner.php.
 	 *
-	 * @param string $dir Directory.
+	 * @throws \RuntimeException When the scanner is missing.
 	 */
-	public static function remove_directory( string $dir ): void {
-		if ( ! is_dir( $dir ) || is_link( $dir ) || false === strpos( basename( $dir ), 'phpcompat-scanner-' ) ) {
-			return;
+	private static function load(): void {
+		$runner = self::dir() . '/runner.php';
+
+		if ( ! is_readable( $runner ) ) {
+			throw new \RuntimeException( esc_html__( 'The scanner is missing from this copy of the plugin. Reinstall it.', 'php-compatibility-checker' ) );
 		}
-		$items = new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ), \RecursiveIteratorIterator::CHILD_FIRST );
-		foreach ( $items as $item ) {
-			if ( $item->isDir() && ! $item->isLink() ) {
-				rmdir( $item->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
-			} else {
-				unlink( $item->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
-			}
-		}
-		rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
+
+		require_once $runner;
 	}
 }

@@ -4,7 +4,7 @@ Tags:              php 8, php, compatibility, phpcompatibility, upgrade
 Requires at least: 6.4
 Requires PHP:      7.4
 Tested up to:      7.2
-Stable tag:        1.6.4
+Stable tag:        2.0.0
 License:           GPLv2 or later
 License URI:       http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,7 +16,7 @@ The WP Engine PHP Compatibility Checker can be used by any WordPress website on 
 
 It checks your plugins and themes with [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), the PHP community's standard compatibility checker for [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), using its WordPress ruleset, [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP). Each problem lists the file and line of the code and why it breaks on that version of PHP. Problems are categorized into errors (the code breaks) and warnings (deprecated, but still runs). The plugin also suggests updates to themes and plugins, as a new version may offer compatible code.
 
-**The scan runs in your browser, not on your server.** PHP runs in the browser through [WordPress Playground](https://wordpress.org/playground/), so scanning doesn't slow down your site or time out on shared hosting. Plugins and themes from WordPress.org are downloaded from there; premium, custom, and modified code is read from your site in small batches.
+**Built for shared hosting.** The scan runs on your site a few files at a time, one short request after another, so it stays within your host's time and memory limits. No code is sent to any other service. Results are kept, and a plugin or theme is only checked again when its files change.
 
 **This plugin does not execute your theme and plugin code, as such this plugin cannot detect runtime compatibility issues.**
 
@@ -26,6 +26,7 @@ It checks your plugins and themes with [PHPCompatibility](https://github.com/PHP
 
 * Every plugin and theme you choose: from WordPress.org, premium, custom, or modified.
 * PHP 7.4, 8.0, 8.1, 8.2, 8.3, 8.4, and 8.5, each on its own. PHP versions below a plugin's or theme's own "Requires PHP" are not counted.
+* Whether a plugin or theme needs a newer PHP than its "Requires PHP" says, from the scan and from Composer's own platform check.
 * Your server's PHP: whether it's the latest release of a branch that still gets security fixes, and whether it's affected by a critical vulnerability such as PHP2Shell (CVE-2026-109618, CVE-2026-109619).
 
 Reports download as PDF (tagged for screen readers), text, CSV, or JSON. WP-CLI commands and the Abilities API give the same results to scripts, hosts, and AI agents.
@@ -45,7 +46,7 @@ To manually install:
 1. Upload the `php-compatibility-checker` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
 
-Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. The first scan loads the scanner (about 8 MB, then cached by your browser); most plugins take a few seconds each after that. The scan runs in your browser, so keep the page open until it finishes.
+Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. Most plugins take a few seconds each; later scans only check what changed. The scan page drives the scan, so keep it open until it finishes.
 
 == Frequently Asked Questions ==
 
@@ -67,11 +68,11 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 5. Can it check premium and custom plugins and themes? =
 
-    Yes. Anything that isn't on WordPress.org, or whose installed version WordPress.org doesn't have, is read from your site in small batches and scanned in your browser. Your code only goes to your own browser; it isn't uploaded anywhere.
+    Yes. Every plugin and theme is checked as installed on your site, whether it's from WordPress.org, premium, custom, or modified. Your code isn't uploaded anywhere.
 
-= 6. The scan stopped with an error about WordPress Playground. What can I do? =
+= 6. Will scanning slow down my site? =
 
-    The scanner runs on WordPress Playground (playground.wordpress.net) and downloads plugins and themes from downloads.wordpress.org. If a firewall, browser extension, or security policy blocks either, the scan can't run. Allow both and scan again, or run `wp php-compat scan` from WP-CLI, which scans on your server instead.
+    Barely. The scan page sends one small request at a time and sizes each to take a few seconds, waits and retries if your site is busy, and skips (and lists) any file that runs into a memory or time limit. A first scan of a large site takes a few minutes; later scans only check what changed. You can also run `wp php-compat scan` from WP-CLI.
 
 = 7. I found a bug, or have a suggestion, can I contribute back? =
 
@@ -87,8 +88,6 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 9. What external services does this plugin use? =
 
-    * [WordPress Playground](https://wordpress.org/playground/) (playground.wordpress.net): runs PHP in your browser for the scan page. Your browser loads it; the code being scanned stays in your browser. See the [WordPress.org privacy policy](https://wordpress.org/about/privacy/).
-    * [WordPress.org](https://wordpress.org) (downloads.wordpress.org): your browser downloads the plugins and themes you scan that are hosted there, by slug and version. See the [WordPress.org privacy policy](https://wordpress.org/about/privacy/).
     * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
 
 == Screenshots ==
@@ -97,14 +96,17 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 == Changelog ==
 
-= Unreleased =
-- New scanner: PHPCompatibility 10 with PHPCompatibilityWP 3 runs in your browser on WordPress Playground (PHP WebAssembly), for PHP 7.4 through 8.5. Premium, custom, and modified plugins and themes are now checked too. The site's server doesn't run the scan, so it's safe on shared hosting. Results are stored on the site and reused until the plugin or theme changes.
+= 2.0.0 =
+- Updates come from WordPress.org again.
+- New scanner: PHPCompatibility 10 with PHPCompatibilityWP 3, built into the plugin, for PHP 7.4 through 8.5. No outside service. Premium, custom, and modified plugins and themes are now checked too. Scans run on the site in short batches sized for shared hosting, with retries, and skip (and list) any file that hits a memory or time limit. Results are stored and reused until a plugin's or theme's files change.
+- Site Health: a test for your active plugins and theme (from stored results; it never scans), and a PHP Compatibility section on the Info tab, so results go into "Copy site info".
+- Flag plugins and themes whose code, or whose Composer dependencies, need a newer PHP than their "Requires PHP" header says.
 - Requires PHP 7.4 and WordPress 6.4.
 - Flag critical PHP vulnerabilities on the server, starting with PHP2Shell (CVE-2026-109618, CVE-2026-109619): the scan page says the server is vulnerable and which release fixes it. CVE-2026-115560's workaround is shown when the server's session settings are exposed.
-- Keep the familiar scan page from 1.6.4, with fixes: a third scan option to choose which plugins and themes to scan (#67), a Cancel link while scanning (#56), progress for each plugin and theme while it's scanned (#42), and clear errors when the scanner can't load (offline, blocked, or timed out) instead of "Status: 0" (#231).
+- Keep the familiar scan page from 1.6.4, with fixes: a third scan option to choose which plugins and themes to scan (#67), a Cancel link while scanning (#56), progress for each plugin and theme while it's scanned (#42), and clear errors when the scanner can't load (offline, blocked, or timed out) instead of "Status: 0" (#231), and a Scan again button once a scan finishes.
 - Each result shows its error count, and notes when every problem is in a bundled library (vendor, third-party), which is a common source of false positives.
 - Show "Update available" on results when WordPress knows of a newer version, as the scan page has always promised to suggest updates.
-- Reports: Download Report now defaults to PDF, with Text, CSV, and JSON as options. The PDF downloads in one click and is tagged for screen readers (headings, tables with header cells, lists, document language and title, bookmarks). It opens with a summary and recommended next steps, states the scan scope, gives a recommended action for each plugin or theme with problems, and groups repeated problems by message. The text report now starts with the site, date, server PHP, WordPress version, and a summary.
+- Reports: Download Report now defaults to PDF, with Text, CSV, and JSON as options. The PDF downloads in one click and is tagged for screen readers (headings, tables with header cells, lists, document language and title, bookmarks). It opens with a summary and recommended next steps, states the scan scope, gives a recommended action for each plugin or theme with problems, groups repeated problems by message, and summarizes problems in bundled libraries per library. The text report now starts with the site, date, server PHP, WordPress version, and a summary.
 - Replace the LocalWP suggestion with a link that opens the plugins and themes with problems in WordPress Playground on the latest PHP.
 - Use core's wp.template() and wp.a11y.speak() instead of bundled Mustache and compare-versions.
 - Tested with WordPress 7.2 (beta 3).
@@ -248,6 +250,11 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 - Basic WP-CLI Commands.
 
 == Upgrade Notice ==
+
+= 2.0.0 =
+- PHP Compatibility scans no longer use an external service: the scanner is built into the plugin and checks PHP 7.4 through 8.5, including premium and custom code.
+- Scans run on your site in short batches sized for shared hosting.
+- Requires PHP 7.4 and WordPress 6.4. Scan again after updating: results from earlier versions don't carry over.
 
 = 1.6.0 =
 - WordPress minimum increased from 4.8 to 5.6.

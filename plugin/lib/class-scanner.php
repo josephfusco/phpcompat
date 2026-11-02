@@ -10,7 +10,7 @@ namespace WPEngine_PHPCompat;
 /**
  * Turns scan reports into statuses for plugins and themes.
  *
- * Reports come from stored results (scans run in the browser or by WP-CLI) or
+ * Reports come from stored results (scans run from the scan page or by WP-CLI) or
  * from scanning the installed files right now (WP-CLI). Applies the same rules
  * as the scan page: versions below an item's "Requires PHP" aren't counted,
  * and items with nothing checkable are "not_checked".
@@ -171,13 +171,21 @@ class Scanner {
 				 * Return a report (see Results::sanitize_report()) to use it instead of
 				 * scanning, e.g. results your host already has. Null scans as usual.
 				 *
-				 * @since 1.7.0
+				 * @since 2.0.0
 				 *
 				 * @param array|null $report Report, or null to scan.
 				 * @param array      $item   Item from get_items().
 				 */
-				$report = apply_filters( 'wpephpcompat_pre_scan_report', null, $item );
-				$stored = $results->save( $item, is_array( $report ) ? $report : Scanner_Bundle::scan_directory( $root ), 'local' );
+				$report      = apply_filters( 'wpephpcompat_pre_scan_report', null, $item );
+				$fingerprint = '';
+				if ( ! is_array( $report ) ) {
+					// Taken before scanning, so a file edited during the scan isn't covered by it.
+					$list                   = self::file_list( $root, self::fingerprint_salt( $item ) );
+					$fingerprint            = $list['fingerprint'];
+					$report                 = Scanner_Bundle::scan_directory( $root );
+					$report['platform_php'] = $list['platform_php'];
+				}
+				$stored = $results->save( $item, $report, 'local', $fingerprint );
 			} catch ( \Throwable $e ) {
 				return $this->result( $item, 'failed', $e->getMessage() );
 			}
@@ -222,10 +230,237 @@ class Scanner {
 			return '';
 		}
 
-		// Must be inside (never equal to) the plugins or themes directory.
-		$parent = realpath( 'theme' === $item['type'] ? get_theme_root( $file ) : WP_PLUGIN_DIR );
+		// Must be inside (never equal to) the plugins or themes directory. A
+		// symlinked plugin (e.g. a Composer path repository) is inside it
+		// where it's installed, even if its files live elsewhere.
+		$parent_dir = 'theme' === $item['type'] ? get_theme_root( $file ) : WP_PLUGIN_DIR;
+		$parent     = realpath( $parent_dir );
+		$inside     = false !== $parent && ( self::is_inside( $real, $parent ) || self::is_inside( $path, $parent_dir ) || self::is_inside( $path, $parent ) );
 
-		return false !== $parent && 0 === strpos( $real, $parent . '/' ) ? $real : '';
+		return $inside ? self::normalize_path( $real ) : '';
+	}
+
+	/**
+	 * A path with forward slashes, as WordPress uses on every OS (Windows'
+	 * realpath() returns backslashes).
+	 *
+	 * @param string $path Path.
+	 * @return string
+	 */
+	public static function normalize_path( $path ) {
+		return function_exists( 'wp_normalize_path' ) ? wp_normalize_path( $path ) : str_replace( '\\', '/', (string) $path );
+	}
+
+	/**
+	 * Whether a path is inside (never equal to) a directory, on any OS.
+	 *
+	 * @param string $path   Path.
+	 * @param string $dir  Directory.
+	 * @return bool
+	 */
+	public static function is_inside( $path, $dir ) {
+		$path = self::normalize_path( $path );
+		$dir  = rtrim( self::normalize_path( $dir ), '/' );
+
+		return '' !== $dir
+			&& 0 === strpos( $path, $dir . '/' )
+			&& strlen( $path ) > strlen( $dir ) + 1
+			&& ! preg_match( '#(^|/)\.\.(/|$)#', $path );
+	}
+
+	/**
+	 * Files bigger than this aren't scanned (generated or data files, not code to check).
+	 */
+	const MAX_FILE_BYTES = 1048576; // 1 MB.
+
+	/**
+	 * Most PHP files listed for one item.
+	 */
+	const MAX_FILES = 20000;
+
+	/**
+	 * A file list with no files.
+	 *
+	 * @return array See file_list().
+	 */
+	public static function empty_file_list() {
+		return array(
+			'files'        => array(),
+			'skipped'      => array(),
+			'truncated'    => false,
+			'fingerprint'  => '',
+			'platform_php' => '',
+		);
+	}
+
+	/**
+	 * What else a file fingerprint depends on: the item's version and the rule set.
+	 *
+	 * @param array $item Item.
+	 * @return string
+	 */
+	public static function fingerprint_salt( $item ) {
+		return (string) $item['version'] . '|' . Scanner_Bundle::ruleset();
+	}
+
+	/**
+	 * An item's PHP files, sorted, with a fingerprint of their current state.
+	 *
+	 * The fingerprint covers every PHP file's path, size, and modification time
+	 * (it only needs a directory walk, no reads), so it changes when any of them
+	 * is added, removed, or edited.
+	 *
+	 * @param string $root Real path of the item's directory or single file.
+	 * @param string $salt Mixed into the fingerprint, e.g. version and rule set.
+	 * @return array {
+	 *     @type string[] $files       Relative paths.
+	 *     @type string[] $skipped     Relative paths of files too big to scan.
+	 *     @type bool     $truncated   Whether there were more than MAX_FILES.
+	 *     @type string   $fingerprint 32 hex characters.
+	 * }
+	 */
+	public static function file_list( $root, $salt = '' ) {
+		$list    = self::empty_file_list();
+		$entries = array();
+
+		if ( is_file( $root ) ) {
+			$entries[ basename( $root ) ] = array( (int) filesize( $root ), (int) filemtime( $root ) );
+		} elseif ( is_dir( $root ) ) {
+			// Doesn't follow symlinked directories, so the walk stays inside the item.
+			$iterator = new \RecursiveIteratorIterator(
+				new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::UNIX_PATHS )
+			);
+			foreach ( $iterator as $file ) {
+				if ( $file->isLink() || ! $file->isFile() || 'php' !== strtolower( $file->getExtension() ) ) {
+					continue;
+				}
+				if ( count( $entries ) >= self::MAX_FILES ) {
+					$list['truncated'] = true;
+					break;
+				}
+				$relative             = substr( $file->getPathname(), strlen( $root ) + 1 );
+				$entries[ $relative ] = array( (int) $file->getSize(), (int) $file->getMTime() );
+			}
+		}
+
+		ksort( $entries, SORT_STRING );
+
+		$hash = hash_init( 'md5' );
+		hash_update( $hash, $salt . "\n" );
+		foreach ( $entries as $relative => $stat ) {
+			hash_update( $hash, $relative . "\0" . $stat[0] . "\0" . $stat[1] . "\n" );
+			if ( $stat[0] > self::MAX_FILE_BYTES ) {
+				$list['skipped'][] = (string) $relative;
+			} else {
+				$list['files'][] = (string) $relative;
+			}
+		}
+		$list['fingerprint']  = hash_final( $hash );
+		$list['platform_php'] = is_dir( $root ) ? self::composer_php( $root, array_keys( $entries ) ) : '';
+
+		return $list;
+	}
+
+	/**
+	 * The PHP version an item's Composer dependencies require, from Composer's
+	 * own vendor/composer/platform_check.php (written by `composer install`
+	 * from every package's "php" requirement). Kept current by the libraries'
+	 * authors, so it never goes stale.
+	 *
+	 * @param string   $root  Item directory.
+	 * @param string[] $files Relative paths of its PHP files.
+	 * @return string Major.minor, e.g. "8.1", or '' if there's no such file.
+	 */
+	public static function composer_php( $root, array $files ) {
+		$highest = 0;
+
+		foreach ( $files as $relative ) {
+			if ( ! preg_match( '#(^|/)composer/platform_check\.php$#', (string) $relative ) ) {
+				continue;
+			}
+			$code = (string) file_get_contents( $root . '/' . $relative, false, null, 0, 8192 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file, first 8 KB.
+			if ( preg_match_all( '/PHP_VERSION_ID\s*>=\s*(\d{5,6})/', $code, $matches ) ) {
+				$highest = max( $highest, ...array_map( 'intval', $matches[1] ) );
+			}
+		}
+
+		return $highest ? intdiv( $highest, 10000 ) . '.' . intdiv( $highest % 10000, 100 ) : '';
+	}
+
+	/**
+	 * The PHP version an item really needs, when that's newer than its
+	 * "Requires PHP" header says (or the header is missing).
+	 *
+	 * Two sources: the scan (the oldest version from which every checked
+	 * version passes) and Composer's platform check.
+	 *
+	 * @param array $item   Item with requires_php.
+	 * @param array $report Report (see Results::sanitize_report()).
+	 * @return array|null {
+	 *     @type string $declared "Requires PHP", or '' if none.
+	 *     @type string $needed   Major.minor.
+	 *     @type string $source   "code" (the scan) or "composer".
+	 *     @type bool   $bundled  Whether everything that needs it is in bundled libraries.
+	 * } Null when the header is right (or nothing is known).
+	 */
+	public static function needed_php( $item, $report ) {
+		$versions = array_map( 'strval', array_keys( isset( $report['versions'] ) ? (array) $report['versions'] : array() ) );
+		usort( $versions, 'version_compare' );
+
+		// Oldest version from which everything newer passes too.
+		$from    = '';
+		$bundled = true;
+		foreach ( array_reverse( $versions ) as $version ) {
+			if ( ! empty( $report['versions'][ $version ]['totals']['errors'] ) ) {
+				foreach ( array_keys( (array) ( $report['versions'][ $version ]['files'] ?? array() ) ) as $path ) {
+					$bundled = $bundled && self::is_bundled( (string) $path );
+				}
+				break;
+			}
+			$from = $version;
+		}
+		// Only a finding when some older checked version fails.
+		$oldest = (string) reset( $versions );
+		$code   = '' !== $from && $oldest !== $from ? $from : '';
+
+		$composer = isset( $report['platform_php'] ) ? (string) $report['platform_php'] : '';
+		$declared = isset( $item['requires_php'] ) ? (string) $item['requires_php'] : '';
+		$floor    = '' !== $declared ? $declared : $oldest;
+
+		$candidates = array_filter(
+			array(
+				'code'     => $code,
+				'composer' => $composer,
+			),
+			static function ( $version ) use ( $floor ) {
+				return '' !== $version && '' !== $floor && version_compare( $version, $floor, '>' );
+			}
+		);
+		if ( ! $candidates ) {
+			return null;
+		}
+
+		uasort( $candidates, 'version_compare' );
+		$needed = (string) end( $candidates );
+		$source = (string) key( $candidates );
+
+		return array(
+			'declared' => $declared,
+			'needed'   => $needed,
+			'source'   => $source,
+			'bundled'  => 'code' === $source && $bundled,
+		);
+	}
+
+	/**
+	 * Whether a path is in a bundled library folder (vendor, third-party, ...).
+	 * Matches LIBRARY_FOLDERS in src/js/include/render.js.
+	 *
+	 * @param string $path Path relative to the item.
+	 * @return bool
+	 */
+	public static function is_bundled( $path ) {
+		return (bool) preg_match( '#(^|/)(vendor|vendor_prefixed|vendor-prefixed|third-party|node_modules)/#i', $path );
 	}
 
 	/**
@@ -289,6 +524,7 @@ class Scanner {
 		$result['php']              = $php;
 		$result['failing_versions'] = $failing;
 		$result['max_php_checked']  = $max;
+		$result['needs_php']        = self::needed_php( $item, $report );
 
 		if ( $include_details ) {
 			$result['problems'] = $problems;
@@ -364,6 +600,7 @@ class Scanner {
 				'php'              => array(),
 				'failing_versions' => array(),
 				'max_php_checked'  => '',
+				'needs_php'        => null,
 				'scanned_at'       => '',
 			)
 		);

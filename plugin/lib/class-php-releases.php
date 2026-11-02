@@ -47,7 +47,7 @@ class Php_Releases {
 		/**
 		 * Filters the critical PHP advisories checked against the server's PHP.
 		 *
-		 * @since 1.7.0
+		 * @since 2.0.0
 		 *
 		 * @param array[] $advisories See Php_Releases::advisories().
 		 */
@@ -72,7 +72,7 @@ class Php_Releases {
 	 * Only for flaws serious enough that "a security release is available"
 	 * undersells them: remote code execution, especially when exploited.
 	 *
-	 * @since 1.7.0
+	 * @since 2.0.0
 	 *
 	 * @return array[] Each advisory: {
 	 *     @type string   $id         Stable identifier.
@@ -125,7 +125,7 @@ class Php_Releases {
 	/**
 	 * Advisories that affect a PHP version and configuration.
 	 *
-	 * @since 1.7.0
+	 * @since 2.0.0
 	 *
 	 * @param string  $version    Version as major.minor.release.
 	 * @param array[] $advisories See advisories().

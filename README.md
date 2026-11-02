@@ -12,21 +12,36 @@ This fork is actively maintained. It's where fixes are developed before being pr
 
 The plugin adds **Tools → PHP Compatibility** to wp-admin. Choose **Only scan active plugins and theme**, **Scan all plugins and themes**, or **Choose which plugins and themes to scan**, then click **Scan site**:
 
-1. The browser loads PHP from [WordPress Playground](https://wordpress.org/playground/) (PHP compiled to WebAssembly, served from playground.wordpress.net) in a hidden iframe, and unpacks the scanner that ships with the plugin (`build/phpcs-bundle.zip`, about 1 MB, checked against its SHA-256).
-2. For each plugin and theme:
-   - **On WordPress.org:** the browser downloads that exact version from downloads.wordpress.org. If WordPress.org doesn't have that version, it's treated like custom code.
-   - **Premium, custom, or modified:** the browser reads its PHP files from this site through the plugin's REST API, in batches of up to 512 KB.
+1. The scan page sends one small request at a time to the plugin's REST API (`POST /wp-json/php-compat/v1/scan-batch`). The first request for each item only plans: it returns the stored result if the item's files haven't changed, otherwise the number of PHP files.
+2. Each following request scans the next batch of files on the site, in-process (no `exec()`), with the scanner that ships in the plugin (`build/scanner/`, plain PHP files). The browser sizes batches to take about 3 seconds, so no request comes near a host's time or memory limit.
 3. `runner.php` runs PHPCompatibilityWP once per PHP version (`testVersion` 7.4, 8.0, … 8.5), so each result means "this code breaks on PHP 8.x". To keep that fast, a first pass checks every file against the whole range and only the files it flags get the per-version passes.
-4. Each item gets a status (Passes, Problems found, Not checked) and a chip per PHP version. Versions below the item's own "Requires PHP" are shown as not counted. Errors fail a version; warnings (deprecations) are listed but still run. Selecting a failing version shows the file, line, and message for each problem.
-5. The result is stored on the site, keyed by the item's version and the scanner's rule set. Later scans reuse results for WordPress.org code (it can't change) and rescan local code. WP-CLI and the Abilities API read the same results.
+4. The browser merges the batches. Each item gets a status (Passes, Problems found, Not checked) and a chip per PHP version. Versions below the item's own "Requires PHP" are shown as not counted. Errors fail a version; warnings (deprecations) are listed but still run. Selecting a failing version shows the file, line, and message for each problem.
+5. The result is stored on the site with the item's version, the scanner's rule set, and a fingerprint of its PHP files (paths, sizes, modification times). Later scans reuse it until any of those change. WP-CLI and the Abilities API read the same results.
 
-The site's server never runs the scan: it only lists plugins and themes, serves local files in small batches, and stores results. That keeps scans off shared hosts with limited CPU and disk I/O.
+Nothing is sent to another service: the code never leaves the site.
+
+The results also feed:
+
+- **Site Health** (Tools → Site Health): a test for the active plugins and theme, and a PHP Compatibility section on the Info tab. It reads stored results and never scans.
+- **"Requires PHP" checks**: an item whose code only passes from a newer PHP than its header says, or whose `vendor/composer/platform_check.php` requires one, gets a note. Both sources keep themselves current.
+
+### Built for shared hosting
+
+Scanning is a resumable batch job, using the usual patterns for that:
+
+- **One request in flight**, so a scan holds at most one PHP worker.
+- **Adaptive batch size**: grows while requests are fast, halves after a slow or failed one. The server also caps every batch (100 files, 1 MB).
+- **Retries with exponential backoff and jitter** on 429, 503, timeouts, and dropped connections, honoring `Retry-After`.
+- **Poison-file isolation**: a batch that crashes PHP (memory, time) is split until the file causing it is found; that file is skipped and listed. If more than a few files crash, the item fails instead of passing.
+- **Optimistic concurrency**: if an item's files change mid-scan, the server answers 409 and the item starts again.
+- **Integrity check**: the bundled scanner is checked against its build's SHA-256 (once a day per build); a missing or incomplete copy says to reinstall instead of failing on every file.
+- **Clean JSON**: messages are collected without phpcs's JSON report, so files that aren't UTF-8 can't break a response, and stray PHP notices before the JSON are skipped.
 
 ### Limitations
 
 - **Static analysis.** Code isn't executed. Code paths that exist for backwards compatibility can show up as failures, and runtime problems won't show up at all.
-- **PHPCompatibility 10 is in alpha.** It's the release line with PHP 8.1–8.5 checks; coverage of some PHP 8.3–8.5 changes is still being added upstream. The exact versions are in every report and in `build/phpcs-bundle.json`.
-- **Needs playground.wordpress.net and downloads.wordpress.org** from the admin's browser. A firewall, browser extension, or security policy that blocks them stops the scan with a message saying so. The `wpephpcompat_playground_remote_url` filter points scans at a self-hosted Playground instead.
+- **PHPCompatibility 10 is in alpha.** It's the release line with PHP 8.1–8.5 checks; coverage of some PHP 8.3–8.5 changes is still being added upstream. The exact versions are in every report and in `build/scanner.json`.
+- **The site does the work.** A first scan of a large site takes a few minutes of one PHP worker; later scans only check what changed. WP-CLI (`wp php-compat scan`) runs the same scanner without request limits.
 
 ## WP-CLI
 
@@ -75,15 +90,17 @@ The scan page shows a notice for each of these. The same data is in `wp php-comp
 | `plugin/lib/class-scanner.php` | Server-side scanner: turns reports into statuses, scans installed files for WP-CLI (used by WP-CLI and abilities) |
 | `plugin/lib/class-scanner-bundle.php` | The bundled scanner: rule set, PHP versions, browser settings, and in-process runs for WP-CLI |
 | `plugin/lib/class-results.php` | Stored results, one non-autoloaded option per plugin or theme |
+| `plugin/lib/class-site-health.php` | Site Health test and Info section |
 | `plugin/lib/class-rest-controller.php` | `php-compat/v1` REST routes: local files in batches, and saving results |
 | `plugin/lib/class-cli-command.php` | `wp php-compat` commands |
 | `plugin/lib/class-abilities.php` | Abilities API registration |
 | `plugin/lib/class-php-releases.php` | Server PHP release status from php.net and critical advisories (latest patch release, branch end of life, PHP2Shell) |
-| `plugin/lib/class-plugin-updater.php` | Serves updates from WP Engine's update server (since 1.6.4) |
 | `src/js/scan.js` | Page wiring: buttons and toggles |
-| `src/js/include/queue-manager.js` | Scan queue: one item at a time, reusing stored results |
-| `src/js/include/scanner.js` | In-browser scanner on WordPress Playground (PHP WebAssembly) |
-| `tools/phpcs-bundle/` | Pinned phpcs + PHPCompatibilityWP (`composer.lock`), `runner.php`, and `build.php`, which writes `plugin/build/phpcs-bundle.zip` |
+| `src/js/include/queue-manager.js` | Scan queue: one item at a time |
+| `src/js/include/scanner.js` | Batched scanning over REST: sizing, retries, skipping, merging |
+| `src/js/include/report-model.js` | What goes in a report (labels, grouping, wording), shared by the PDF and the printable page |
+| `plugin/lib/class-rest-controller.php` | `POST /scan-batch` and `POST /results` |
+| `tools/phpcs-bundle/` | Pinned phpcs + PHPCompatibilityWP (`composer.lock`), `runner.php`, `collect-report.php`, and `build.php`, which writes `plugin/build/scanner/` and `scanner.json` (plain files: WordPress.org doesn't accept archives in plugins) |
 | `src/js/include/render.js` | Results rendering (Mustache template in the PHP class) |
 | `plugin/build/` | Compiled assets (git-ignored; created by `npm run build`) |
 | `tests/*Test.php` | PHP unit tests (PHPUnit + Brain Monkey) |
@@ -93,8 +110,7 @@ The scan page shows a notice for each of these. The same data is in `wp php-comp
 
 - `phpcompat_excluded_plugins` and `phpcompat_excluded_themes`: names to leave out of scans.
 - `phpcompat_plugins_to_scan` and `phpcompat_themes_to_scan`: the final lists sent to the browser.
-- `wpephpcompat_pre_scan_report`: supply a report for an item instead of scanning it with WP-CLI.
-- `wpephpcompat_playground_remote_url`: where the browser loads PHP WebAssembly from (default `https://playground.wordpress.net/remote.html`).
+- `wpephpcompat_pre_scan_report`: supply a report for an item instead of scanning it (scan page and WP-CLI), e.g. results your host already has.
 - `wpephpcompat_php_advisories`: the critical PHP advisories checked against the server.
 
 ## Local development
@@ -130,7 +146,7 @@ npm run test:e2e       # Playwright end-to-end tests
 npm run test:e2e:debug # Same, with the Playwright inspector
 ```
 
-The end-to-end tests run against a separate wp-env site defined in `.wp-env.tests.json` (http://localhost:8889, started automatically), so your development site isn't touched. A small must-use plugin (`tests/e2e/fixtures/phpcompat-e2e.php`) is mapped into that site only. It supplies a fixed list of plugins and themes, fixture scan reports for WP-CLI, and switches for the WP Engine sidebar and a test advisory. In the browser the tests replace the Playground runtime with the same fixture reports, so they're fast and don't need the network. `tests/RunnerTest.php` runs real scans with the bundled scanner on a fixture plugin (run `composer install -d tools/phpcs-bundle` first).
+The end-to-end tests run against a separate wp-env site defined in `.wp-env.tests.json` (http://localhost:8889, started automatically), so your development site isn't touched. A small must-use plugin (`tests/e2e/fixtures/phpcompat-e2e.php`) is mapped into that site only. It supplies a fixed list of plugins and themes, fixture scan reports for WP-CLI, and switches for the WP Engine sidebar and a test advisory. Most browser tests replace the scanner with the same fixture reports, so they can hold or fail a scan on cue; one test runs the real batched scanner through `/scan-batch`, where the fixture plugin answers with those reports, and checks that nothing is loaded from another site. `tests/RunnerTest.php` runs real scans with the bundled scanner on a fixture plugin (run `composer install -d tools/phpcs-bundle` first).
 
 CI runs all of these on every pull request. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
@@ -144,14 +160,13 @@ The build and tests use WordPress's own maintained tooling, so there's little fo
 - WordPress design tokens (`--wpds-*`), with fallbacks for older WordPress added at build time by `@wordpress/theme` (`postcss.config.js`).
 - Core SVG icons via `wp_get_icon()` (WordPress 7.1+), with Dashicons on older versions.
 - `jquery`, `wp-i18n`, and `wp-api-fetch` are loaded from WordPress, not bundled.
-- [`@wp-playground/client`](https://www.npmjs.com/package/@wp-playground/client) (pinned) to run PHP in the browser; loaded only when a scan starts.
 - The scanner itself is a Composer project in `tools/phpcs-bundle` with a lock file, built into the plugin by `npm run build`.
 
 ## Automation
 
 | Workflow | What it does |
 | --- | --- |
-| [CI](.github/workflows/ci.yml) | Lint, unit tests on PHP 8.3 and 8.4, and a build check |
+| [CI](.github/workflows/ci.yml) | Lint, unit tests on PHP 8.3 and 8.4, a build check (including that no archives ship, which WordPress.org rejects), and end-to-end tests |
 | [Dependabot](.github/dependabot.yml) and [auto-merge](.github/workflows/dependabot-auto-merge.yml) | Weekly dependency updates. Dev-only minor and patch updates merge automatically once CI passes. Scanner updates (`tools/phpcs-bundle`) always get a human review, since they change results. |
 | [Tested up to](.github/workflows/tested-up-to.yml) | Weekly. Opens a PR when a new WordPress version ships. |
 

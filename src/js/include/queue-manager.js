@@ -7,13 +7,7 @@ import {
 import $ from 'jquery';
 import { hideDownload, showDownload } from './download';
 import { __, sprintf } from '@wordpress/i18n';
-import {
-	scanItem,
-	saveResult,
-	stopEngine,
-	getEngine,
-	ScanError,
-} from './scanner';
+import { scanItem, saveResult, cancelScans, ScanError } from './scanner';
 
 const progress = $( '.wpe-pcc-progress' );
 const progressCount = $( '.wpe-pcc-progress-count' );
@@ -35,8 +29,8 @@ export function initQueue( itemsToScan, mode ) {
 	window.phpcompat.scanId = ( window.phpcompat.scanId || 0 ) + 1;
 
 	if ( window.phpcompat.running ) {
-		// Stop the PHP runtime mid-scan; the next scan starts a fresh one.
-		stopEngine();
+		// Stop sending batches; the next scan starts fresh.
+		cancelScans();
 		window.phpcompat.running = false;
 	}
 
@@ -72,11 +66,8 @@ export function limitQueue( ids ) {
 }
 
 /**
- * Scan one item, or reuse its stored result.
- *
- * Results for code from WordPress.org are reused when the same version was
- * already scanned with the same rules: that code can't change. Code read from
- * this site can change without a new version number, so it's always scanned.
+ * Scan one item. The site returns the stored result instead when the item's
+ * files haven't changed since it was scanned with the same rules.
  *
  * @param {Object}     job Queued item.
  * @param {() => void} cb  Called when done (not called if the scan was reset).
@@ -85,30 +76,27 @@ export async function executeJob( job, cb ) {
 	const scanId = window.phpcompat.scanId;
 	const current = () => scanId === window.phpcompat.scanId;
 
-	if ( job.stored && 'wporg' === job.stored.source ) {
-		window.phpcompat.results.push( job );
-		updateResult( job.stored.report, job );
-		updateProgress();
-		cb();
-		return;
-	}
-
 	setItemStatus( job, __( 'Scanning…', 'php-compatibility-checker' ), true );
 	window.phpcompat.running = true;
 
 	try {
-		const { report, source } = await scanItem( job, ( text ) => {
-			if ( current() ) {
-				setItemStatus( job, text, true );
+		const { report, source, fingerprint, cached } = await scanItem(
+			job,
+			( text ) => {
+				if ( current() ) {
+					setItemStatus( job, text, true );
+				}
 			}
-		} );
+		);
 		if ( ! current() ) {
 			return;
 		}
 		window.phpcompat.results.push( job );
 		updateResult( report, job );
 		updateProgress();
-		saveResult( job, report, source );
+		if ( ! cached ) {
+			saveResult( job, report, source, fingerprint );
+		}
 	} catch ( error ) {
 		if ( ! current() ) {
 			return;
@@ -172,6 +160,13 @@ export function runNextJob() {
 		showDownload();
 		finishResults();
 		$( 'input[type=radio][name=active_plugins]' ).prop( 'disabled', false );
+		// Ready to scan again: unchanged items come back from storage at once.
+		window.phpcompat.finished = true;
+		// One primary action at a time: with results on screen, that's the download.
+		$( '#runButton' )
+			.prop( 'disabled', false )
+			.removeClass( 'button-primary' )
+			.val( __( 'Scan again', 'php-compatibility-checker' ) );
 
 		// Only offer help when something actually failed.
 		if ( $( '[data-result="problems"]' ).length ) {
@@ -181,7 +176,7 @@ export function runNextJob() {
 		return;
 	}
 
-	// One at a time: each scan uses the same PHP runtime.
+	// One item at a time, one request at a time: a scan uses at most one PHP worker.
 	executeJob( window.phpcompat.queue.shift(), runNextJob );
 }
 
@@ -208,46 +203,13 @@ export function startProgress() {
 	$( '.wpe-pcc-spinner' ).show();
 	progress.show();
 	showProgressCount();
-	warmUpEngine();
-}
-
-/**
- * Start loading the PHP runtime as soon as the scan starts, while stored
- * results are shown, if any item needs a real scan. Loading progress goes on
- * the progress line, not on whichever item happens to wait for it.
- */
-function warmUpEngine() {
-	const needsScan = window.phpcompat.queue.some(
-		( job ) => ! ( job.stored && 'wporg' === job.stored.source )
+	window.phpcompat.queue.forEach( ( job ) =>
+		setItemStatus( job, __( 'Waiting…', 'php-compatibility-checker' ) )
 	);
-	if ( ! needsScan || 'function' === typeof window.phpcompatTestScanner ) {
-		return;
-	}
-	const scanId = window.phpcompat.scanId;
-	const note = ( text ) => {
-		if ( scanId === window.phpcompat.scanId ) {
-			progressNote().text( text );
-		}
-	};
-	window.phpcompat.running = true;
-	getEngine( note ).then(
-		() => note( '' ),
-		() => note( '' )
-	);
-}
-
-function progressNote() {
-	let note = progress.find( '.wpe-pcc-progress-note' );
-	if ( ! note.length ) {
-		note = $( '<span class="wpe-pcc-progress-note"></span>' );
-		progressCount.after( note );
-	}
-	return note;
 }
 
 function resetProgress() {
 	$( '.wpe-pcc-spinner' ).hide();
 	progressCount.text( '' );
-	progress.find( '.wpe-pcc-progress-note' ).remove();
 	progress.hide();
 }

@@ -1,6 +1,6 @@
 {
 	"name": "wpengine/phpcompat-phpcs-bundle",
-	"description": "PHP_CodeSniffer and PHPCompatibilityWP, zipped into the plugin and run in the browser on PHP WebAssembly (WordPress Playground).",
+	"description": "PHP_CodeSniffer and PHPCompatibilityWP, copied into the plugin (build/scanner) and run in-process by the plugin.",
 	"license": "GPL-2.0-or-later",
 	"minimum-stability": "alpha",
 	"prefer-stable": true,

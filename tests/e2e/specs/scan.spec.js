@@ -193,25 +193,126 @@ test.describe( 'PHP Compatibility scan', () => {
 		).toHaveAttribute( 'href', 'https://example.com/e2e' );
 	} );
 
-	test( 'reuses stored results for WordPress.org code, rescans local code', async ( {
+	test( 'scans on the site in batches, with no outside service', async ( {
 		admin,
 		page,
 	} ) => {
-		const requested = await mockScanner( page );
+		// No mock: the real scanner code talks to /scan-batch, where the e2e
+		// fixture plugin supplies reports through wpephpcompat_pre_scan_report.
 		await admin.visitAdminPage( ...PAGE );
+
+		// From here on, nothing may be loaded from another site.
+		const outside = [];
+		page.on( 'request', ( request ) => {
+			const url = new URL( request.url() );
+			if ( 'localhost' !== url.hostname ) {
+				outside.push( url.hostname );
+			}
+		} );
+		const batches = [];
+		page.on( 'request', ( request ) => {
+			if ( request.url().includes( 'scan-batch' ) ) {
+				batches.push( request.postDataJSON() );
+			}
+		} );
+
 		await scanButton( page ).click();
 		await scanFinished( page );
-		// Results are saved in the background; let those requests land.
-		await page.waitForLoadState( 'networkidle' );
-		requested.length = 0;
 
-		await admin.visitAdminPage( ...PAGE );
-		await scanButton( page ).click();
-		await scanFinished( page );
-
-		// Only the custom plugin's files can change without a new version.
-		expect( requested ).toEqual( [ 'custom-plugin' ] );
+		expect( batches.map( ( b ) => b.slug ).sort() ).toEqual( [
+			'custom-plugin',
+			'new-php-plugin',
+			'passing-plugin',
+			'passing-theme',
+			'problem-plugin',
+		] );
 		await expect( results( page, 'problems' ) ).toHaveCount( 1 );
+		await expect(
+			page.locator( '#plugin_problem-plugin' )
+		).toHaveAttribute( 'data-result', 'problems' );
+		expect( outside ).toEqual( [] );
+	} );
+
+	test( 'scans again without clearing results first', async ( {
+		admin,
+		page,
+	} ) => {
+		const scanned = await mockScanner( page );
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+		await scanFinished( page );
+
+		const again = page.getByRole( 'button', { name: 'Scan again' } );
+		await expect( again ).toBeEnabled();
+		scanned.length = 0;
+		await again.click();
+		await scanFinished( page );
+
+		expect( scanned.length ).toBeGreaterThan( 0 );
+		await expect( results( page, 'problems' ) ).toHaveCount( 1 );
+	} );
+
+	test( 'refuses scan requests from people who are not logged in', async ( {
+		playwright,
+	} ) => {
+		const anonymous = await playwright.request.newContext( {
+			baseURL: process.env.WP_BASE_URL || 'http://localhost:8889',
+		} );
+		// Complete requests: WordPress validates arguments before permissions.
+		const requests = {
+			'scan-batch': { type: 'plugin', slug: 'passing-plugin', limit: 0 },
+			results: {
+				type: 'plugin',
+				slug: 'passing-plugin',
+				version: '1.0.0',
+				ruleset: 'x',
+				source: 'local',
+				report: {},
+			},
+		};
+		for ( const [ path, data ] of Object.entries( requests ) ) {
+			const response = await anonymous.post(
+				`/wp-json/php-compat/v1/${ path }`,
+				{ data }
+			);
+			expect( response.status() ).toBe( 401 );
+		}
+		await anonymous.dispose();
+	} );
+
+	test( 'reports stored results in Site Health', async ( {
+		admin,
+		page,
+	} ) => {
+		await admin.visitAdminPage( 'site-health.php' );
+		await expect( page.locator( '.health-check-body' ) ).toContainText(
+			'Check your plugins and themes for PHP compatibility'
+		);
+
+		await mockScanner( page );
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+		await scanFinished( page );
+		await page.waitForLoadState( 'networkidle' );
+
+		await admin.visitAdminPage( 'site-health.php' );
+		const body = page.locator( '.health-check-body' );
+		await expect( body ).toContainText(
+			'Some active plugins or themes have problems on newer PHP versions'
+		);
+		await body
+			.getByRole( 'button', {
+				name: /Some active plugins or themes have problems/,
+			} )
+			.click();
+		await expect( body ).toContainText(
+			'Problem Plugin 2.0.0: problems on PHP'
+		);
+
+		await admin.visitAdminPage( 'site-health.php', 'tab=debug' );
+		await expect(
+			page.getByText( 'Stored results of the PHP Compatibility Checker' )
+		).toBeAttached();
 	} );
 
 	test( 'failing versions open and close their details', async ( {
@@ -247,7 +348,7 @@ test.describe( 'PHP Compatibility scan', () => {
 		await mockScanner( page, {
 			fail: {
 				'passing-plugin':
-					'Could not load the scanner from WordPress Playground (playground.wordpress.net).',
+					'This site stopped responding to the scan (HTTP 503).',
 			},
 		} );
 		await admin.visitAdminPage( ...PAGE );
@@ -255,7 +356,7 @@ test.describe( 'PHP Compatibility scan', () => {
 
 		const item = page.locator( '#plugin_passing-plugin' );
 		await expect( item ).toContainText( 'Scan failed' );
-		await expect( item ).toContainText( 'WordPress Playground' );
+		await expect( item ).toContainText( 'stopped responding' );
 		await expect( item ).not.toContainText( 'Status: 0' );
 	} );
 

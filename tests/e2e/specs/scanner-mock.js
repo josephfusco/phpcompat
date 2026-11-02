@@ -1,6 +1,6 @@
 /**
- * Replace the in-browser scanner (PHP WebAssembly from WordPress Playground)
- * with fixture reports, so tests don't depend on the network. The same
+ * Replace the batched scanner with fixture reports, so tests can hold or fail
+ * a scan on cue. The same
  * fixtures feed WP-CLI and the Abilities API through the e2e fixture plugin.
  */
 const fixtures = require( '../fixtures/scan-fixtures.json' );

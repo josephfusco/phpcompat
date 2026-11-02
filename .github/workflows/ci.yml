@@ -71,6 +71,12 @@ jobs:
 
       # Guards against the scan script shipping without its WordPress script
       # dependencies (which breaks the scan page when wp-i18n isn't loaded).
+      # WordPress.org's Plugin Check rejects compressed and phar files.
+      - name: No archives in the plugin
+        run: |
+          found=$(find plugin -type f \( -name '*.zip' -o -name '*.gz' -o -name '*.tgz' -o -name '*.tar' -o -name '*.rar' -o -name '*.7z' -o -name '*.phar' \))
+          if [ -n "$found" ]; then echo "$found"; exit 1; fi
+
       - name: Check script dependencies
         run: |
           grep -q "'wp-i18n'" plugin/build/scan.asset.php

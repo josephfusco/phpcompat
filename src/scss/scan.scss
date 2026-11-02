@@ -15,7 +15,7 @@ $color-border: #c3c4c7;
 
 	&-wrap {
 
-		.button-primary {
+		.button {
 
 			.dashicons,
 			.dashicons-before {
@@ -29,15 +29,19 @@ $color-border: #c3c4c7;
 		border: 1px solid $color-border;
 		border-left-width: 4px;
 		box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
-		margin: 5px 15px 2px;
-		padding: 1px 12px;
+		margin: 0 0 8px;
+		padding: 2px 12px;
 		position: relative;
 
+		// Inline, right after the status text, at the text's size.
 		.spinner {
-			position: absolute;
-			right: 0;
-			top: 10px;
+			background-size: 16px 16px;
+			float: none;
+			height: 16px;
+			margin: -2px 0 0 6px;
+			vertical-align: middle;
 			visibility: visible;
+			width: 16px;
 		}
 
 		&-error {
@@ -93,6 +97,16 @@ $color-border: #c3c4c7;
 
 	&-main {
 		padding-right: 40px;
+		// A table cell sizes to its content; fill the row instead, so capping
+		// the prose's width doesn't shrink the cards and toolbar with it.
+		width: 100%;
+	}
+
+	// Without the sidebar there's nothing to sit beside: a plain block.
+	&-layout:not(.wpe-pcc-has-aside) &-main {
+		display: block;
+		padding-right: 0;
+		padding-left: 0;
 	}
 
 	&-aside {
@@ -190,8 +204,7 @@ $color-border: #c3c4c7;
 			border-right-width: 4px;
 
 			.spinner {
-				left: 0;
-				right: auto;
+				margin: -2px 6px 0 0;
 			}
 
 			&-error {
@@ -269,13 +282,8 @@ $color-warning: #dba617;
 		margin-left: 10px;
 	}
 
-	&-progress-note:not(:empty) {
-		margin-left: 10px;
-		color: #50575e;
-	}
-
 	&-select-actions {
-		margin: 0 15px 8px;
+		margin: 0 0 8px;
 	}
 
 }
@@ -287,8 +295,7 @@ $color-warning: #dba617;
 		border-right-color: $color-warning;
 	}
 
-	&-cancel,
-	&-progress-note:not(:empty) {
+	&-cancel {
 		margin-left: 0;
 		margin-right: 10px;
 	}
@@ -314,7 +321,7 @@ $color-warning: #dba617;
 		}
 	}
 
-	&-download-report .button-primary {
+	&-download-report .button {
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
@@ -364,4 +371,70 @@ $color-warning: #dba617;
 .rtl .wpe-pcc-alert .wpe-pcc-results > * {
 	margin-right: 0;
 	margin-left: 8px;
+}
+
+// Layout rhythm: readable line length, consistent spacing, quieter hints.
+.wpe-pcc {
+
+	// Prose at a readable width; cards and tables keep the full width.
+	&-main > p,
+	&-attention,
+	&-footer ul {
+		max-width: 80ch;
+	}
+
+	&-main > hr,
+	&-results > hr,
+	&-footer > hr {
+		margin: 24px 0 8px;
+	}
+
+	&-scan-options h2,
+	&-results > h2 {
+		margin: 1em 0 0.75em;
+	}
+
+	&-form-table {
+		margin-top: 0;
+
+		th,
+		td {
+			padding-top: 8px;
+			padding-bottom: 8px;
+		}
+	}
+
+	// "Plugins" and "Themes" sit under the results heading, not above it.
+	&-results h3 {
+		font-size: 14px;
+		margin: 20px 0 8px;
+	}
+
+	&-download-report {
+		margin-bottom: 4px;
+
+		hr {
+			margin: 8px 0 0;
+		}
+	}
+
+	&-alert .description {
+		color: #646970;
+	}
+
+	&-alert .wpe-pcc-php-version-report h4 {
+		margin: 1em 0 0.5em;
+	}
+
+	&-attention {
+		margin-top: 16px;
+	}
+
+	&-footer {
+		margin-top: 8px;
+
+		ul {
+			margin-top: 8px;
+		}
+	}
 }

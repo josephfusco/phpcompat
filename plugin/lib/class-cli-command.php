@@ -14,7 +14,7 @@ use WP_CLI\Utils;
  * Check plugins and themes for PHP compatibility.
  *
  * Scans the installed files with PHPCompatibilityWP, the same scanner the
- * Tools > PHP Compatibility page runs in the browser, for PHP 7.4 to 8.5.
+ * Tools > PHP Compatibility page runs in batches, for PHP 7.4 to 8.5.
  * Works for every plugin and theme, including premium and custom code.
  *
  * ## EXAMPLES
@@ -55,7 +55,7 @@ class CLI_Command {
 	 * : Use stored results (from the scan page or an earlier run) instead of scanning. Items without one are "not_scanned".
 	 *
 	 * [--fields=<fields>]
-	 * : Fields to show. Available: type, slug, name, version, active, requires_php, source, status, failing_versions, reason, max_php_checked, scanned_at.
+	 * : Fields to show. Available: type, slug, name, version, active, requires_php, needs_php, source, status, failing_versions, reason, max_php_checked, scanned_at.
 	 * ---
 	 * default: name,type,version,status,failing_versions,reason
 	 * ---
@@ -284,6 +284,8 @@ class CLI_Command {
 		$row                     = $result;
 		$row['active']           = $result['active'] ? 'yes' : 'no';
 		$row['failing_versions'] = implode( ', ', $result['failing_versions'] );
+		// The PHP it really needs, when newer than "Requires PHP" (from the scan or Composer).
+		$row['needs_php'] = ! empty( $result['needs_php'] ) ? $result['needs_php']['needed'] . ' (' . $result['needs_php']['source'] . ')' : '';
 		unset( $row['php'], $row['problems'] );
 
 		return $row;
