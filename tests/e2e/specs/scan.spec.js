@@ -366,7 +366,12 @@ test.describe( 'PHP Compatibility scan', () => {
 		await scanButton( page ).click();
 
 		const item = page.locator( '#plugin_passing-plugin' );
-		await expect( item ).toContainText( 'Checking PHP 7.4' );
+		await expect( item ).toContainText( 'Checking files: 3 of 10' );
+		const bar = item.getByRole( 'progressbar', {
+			name: 'Files checked in Passing Plugin',
+		} );
+		await expect( bar ).toHaveAttribute( 'value', '3' );
+		await expect( bar ).toHaveAttribute( 'max', '10' );
 		await page.evaluate( () => window.phpcompatRelease() );
 		await expect( item ).toHaveAttribute( 'data-result', 'success' );
 	} );

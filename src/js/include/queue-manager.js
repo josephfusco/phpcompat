@@ -82,9 +82,9 @@ export async function executeJob( job, cb ) {
 	try {
 		const { report, source, fingerprint, cached } = await scanItem(
 			job,
-			( text ) => {
+			( text, files ) => {
 				if ( current() ) {
-					setItemStatus( job, text, true );
+					setItemStatus( job, text, true, files );
 				}
 			}
 		);

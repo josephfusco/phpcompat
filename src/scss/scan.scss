@@ -438,3 +438,16 @@ $color-warning: #dba617;
 		}
 	}
 }
+
+// Per-item progress while its files are checked.
+.wpe-pcc-item-progress {
+	accent-color: var(--wp-admin-theme-color, #2271b1);
+	height: 8px;
+	margin: 0 0 0 8px;
+	vertical-align: middle;
+	width: 120px;
+}
+
+.rtl .wpe-pcc-item-progress {
+	margin: 0 8px 0 0;
+}
