@@ -1,10 +1,15 @@
 /* global checkerList */
 import '../scss/scan.scss';
 import jQuery from 'jquery';
-import { __, _n, sprintf } from '@wordpress/i18n';
-import { initQueue, runNextJob, limitQueue } from './include/queue-manager';
+import {
+	initQueue,
+	runNextJob,
+	limitQueue,
+	startProgress,
+} from './include/queue-manager';
 import { initResults, getSelectedIds } from './include/render';
-import { downloadReport } from './include/download';
+import { downloadReport, reportMeta } from './include/download';
+import { printReport } from './include/print-report';
 
 ( function ( $ ) {
 	if ( 'undefined' === typeof checkerList ) {
@@ -18,11 +23,18 @@ import { downloadReport } from './include/download';
 		xhr: false,
 		ticker: false,
 		results: [],
+		report: [],
 	};
 
+	const activeOnlySwitch = $( 'input[type=radio][name=active_plugins]' );
 	const runButton = $( '#runButton' );
 
 	init();
+
+	activeOnlySwitch.on( 'change', function () {
+		disableDeveloperMode();
+		init();
+	} );
 
 	$( '#cleanupButton' ).on( 'click', function ( event ) {
 		event.preventDefault();
@@ -30,76 +42,65 @@ import { downloadReport } from './include/download';
 		init();
 	} );
 
+	// Stop a running scan and go back to the list (#56).
+	$( '#cancelButton' ).on( 'click', function ( event ) {
+		event.preventDefault();
+		init();
+		runButton.trigger( 'focus' );
+	} );
+
 	runButton.on( 'click', function ( event ) {
 		event.preventDefault();
 
-		const ids = getSelectedIds();
-		if ( ! ids.length ) {
-			return;
-		}
-		limitQueue( ids );
-
-		// Drop unselected items from the list and lock the selection.
-		$( '.wpe-pcc-select' )
-			.not( ':checked' )
-			.closest( '.wpe-pcc-alert' )
-			.remove();
-		$( '.wpe-pcc-select' ).prop( 'disabled', true );
-		$( '.wpe-pcc-select-actions' ).hide();
-		$( '#wpe_pcc_results h3' ).each( function () {
-			if ( ! $( this ).nextUntil( 'h3', '.wpe-pcc-alert' ).length ) {
-				$( this ).remove();
+		// "Choose" mode scans only the ticked items (#67).
+		if ( 'choose' === mode() ) {
+			const ids = getSelectedIds();
+			if ( ! ids.length ) {
+				return;
 			}
-		} );
+			limitQueue( ids );
+			$( '.wpe-pcc-select' )
+				.not( ':checked' )
+				.closest( '.wpe-pcc-alert' )
+				.remove();
+			$( '.wpe-pcc-select' ).prop( 'disabled', true );
+			$( '.wpe-pcc-select-actions' ).hide();
+		}
 
+		// Recorded for the reports: what this scan covered.
+		window.phpcompat.scope = mode();
+
+		activeOnlySwitch.prop( 'disabled', true );
+		$( this ).prop( 'disabled', true );
+		startProgress();
 		runNextJob();
-		$( '.wpe-pcc-spinner' ).show();
-		runButton
-			.prop( 'disabled', true )
-			.val( __( 'Scanning…', 'php-compatibility-checker' ) );
 	} );
 
 	$( document ).on( 'change', '.wpe-pcc-select', updateRunButton );
 
-	$( document ).on(
-		'click',
-		'.wpe-pcc-select-actions button',
-		function ( event ) {
-			event.preventDefault();
-			const select = $( this ).data( 'select' );
-			$( '.wpe-pcc-select' ).each( function () {
-				let checked = 'all' === select;
-				if ( 'active' === select ) {
-					checked = 'yes' === $( this ).data( 'active' );
-				}
-				$( this ).prop( 'checked', checked );
-			} );
-			updateRunButton();
-		}
-	);
+	$( '.wpe-pcc-select-actions' ).on( 'click', 'button', function ( event ) {
+		event.preventDefault();
+		$( '.wpe-pcc-select' ).prop(
+			'checked',
+			'all' === $( this ).data( 'select' )
+		);
+		updateRunButton();
+	} );
 
 	$( document ).on(
 		'click',
 		'.wpe-pcc-php-version-errors',
 		function ( event ) {
 			event.preventDefault();
-			const button = $( this );
-			const phpVersion = button.data( 'php-version' );
-			const report = button
-				.closest( '.wpe-pcc-alert' )
-				.find(
-					`.wpe-pcc-php-version-report[data-php-version="${ phpVersion }"]`
-				);
+			const link = $( this );
+			const report = $( `#${ link.attr( 'aria-controls' ) }` );
 			const opening = ! report.is( ':visible' );
-
-			// Only one report open at a time.
 			$( '.wpe-pcc-php-version-report' ).not( report ).hide();
 			$( '.wpe-pcc-php-version-errors' )
-				.not( button )
+				.not( link )
 				.attr( 'aria-expanded', 'false' );
-
 			report.toggle( opening );
-			button.attr( 'aria-expanded', opening ? 'true' : 'false' );
+			link.attr( 'aria-expanded', opening ? 'true' : 'false' );
 		}
 	);
 
@@ -108,14 +109,10 @@ import { downloadReport } from './include/download';
 		'.wpe-pcc-php-version-report-close',
 		function ( event ) {
 			event.preventDefault();
-			const report = $( this ).closest( '.wpe-pcc-php-version-report' );
-			const phpVersion = report.data( 'php-version' );
-			report.hide();
-			report
-				.closest( '.wpe-pcc-alert' )
-				.find(
-					`.wpe-pcc-php-version-errors[data-php-version="${ phpVersion }"]`
-				)
+			const report = $( this )
+				.closest( '.wpe-pcc-php-version-report' )
+				.hide();
+			$( `[aria-controls="${ report.attr( 'id' ) }"]` )
 				.attr( 'aria-expanded', 'false' )
 				.trigger( 'focus' );
 		}
@@ -127,35 +124,39 @@ import { downloadReport } from './include/download';
 		$( '#wpe_pcc_results' ).toggle( ! raw );
 	} );
 
-	$( '#downloadReport' ).on( 'click', function ( event ) {
+	$( '#downloadReport' ).on( 'click', async function ( event ) {
 		event.preventDefault();
-		downloadReport();
+		const format = $( '#wpe-pcc-export-format' ).val();
+		if ( 'pdf' !== format ) {
+			downloadReport( format );
+			return;
+		}
+
+		// PDF: an accessible report, saved with the browser's print dialog so
+		// browsers that tag PDFs keep headings, tables, and language.
+		const items = window.phpcompat.report;
+		if ( items.length ) {
+			printReport( items, reportMeta( items ) );
+		}
 	} );
 
+	function mode() {
+		return activeOnlySwitch.filter( ':checked' ).val();
+	}
+
 	function init() {
-		initQueue( checkerList );
-		initResults( checkerList );
-		$( '.wpe-pcc-toolbar' ).show();
+		initQueue( checkerList, mode() );
+		initResults( checkerList, mode() );
+		activeOnlySwitch.prop( 'disabled', false );
+		$( '.wpe-pcc-select-actions' ).toggle( 'choose' === mode() );
+		runButton.prop( 'disabled', false );
 		updateRunButton();
 	}
 
-	// The scan button shows how many items are selected, and is disabled
-	// when there are none.
 	function updateRunButton() {
-		const count = getSelectedIds().length;
-		runButton.prop( 'disabled', ! count );
-		runButton.val(
-			sprintf(
-				/* translators: %d: number of selected plugins and themes. */
-				_n(
-					'Scan %d item',
-					'Scan %d items',
-					count,
-					'php-compatibility-checker'
-				),
-				count
-			)
-		);
+		if ( 'choose' === mode() ) {
+			runButton.prop( 'disabled', ! getSelectedIds().length );
+		}
 	}
 
 	function disableDeveloperMode() {
