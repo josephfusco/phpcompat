@@ -172,6 +172,10 @@ The build and tests use WordPress's own maintained tooling, so there's little fo
 
 The scheduled workflows and auto-merge only run on `wpengine/phpcompat`.
 
+## WordPress.org assets
+
+`.wordpress-org/` holds the listing's banner, icons, and screenshots (`screenshot-1.png` to `screenshot-3.png`, matching the captions in `readme.txt`). They go in the SVN repository's `/assets` folder, not in the plugin zip.
+
 ## Building a release zip
 
 ```bash
