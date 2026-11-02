@@ -43,6 +43,10 @@
       "options": {
         "activate": true
       }
+    },
+    {
+      "step": "runPHP",
+      "code": "<?php require_once '/wordpress/wp-load.php'; // Broken Link Checker redirects to its own dashboard on the first admin load after activation; land on the checker instead.\ndelete_transient( 'blc_activation_redirect' );"
     }
   ]
 }
