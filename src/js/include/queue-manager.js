@@ -1,20 +1,33 @@
-import { updateResultFailure, updateResult } from './render';
+import {
+	updateResultFailure,
+	updateResult,
+	finishResults,
+	setItemStatus,
+} from './render';
 import $ from 'jquery';
 import { hideDownload, showDownload } from './download';
-import { __, _n, sprintf } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 
-const progress = $( '.wpe-progress-active' );
+// Tide audits new versions on demand. Poll every 5 seconds for up to 2 minutes,
+// then report the item as still pending instead of spinning forever.
+const RETRY_DELAY = 5000;
+const MAX_ATTEMPTS = 24;
+
+const progress = $( '.wpe-pcc-progress' );
 const progressCount = $( '.wpe-pcc-progress-count' );
 
 /**
- * Queue every plugin and theme. limitQueue() narrows it to the selection.
+ * Queue the plugins and themes for the selected scan option. In "choose"
+ * mode everything is queued and limitQueue() narrows it to the selection.
  *
  * @param {Object} itemsToScan Plugins and themes from the page.
+ * @param {string} mode        "yes" (active only), "no" (all), or "choose".
  */
-export function initQueue( itemsToScan ) {
+export function initQueue( itemsToScan, mode ) {
 	// Reset the queue.
 	window.phpcompat.queue = [];
 	window.phpcompat.results = [];
+	window.phpcompat.report = [];
 	window.phpcompat.total = 0;
 	window.phpcompat.completed = 0;
 
@@ -25,15 +38,17 @@ export function initQueue( itemsToScan ) {
 
 	hideDownload();
 	resetProgress();
+	$( '.wpe-pcc-playground' ).hide();
 	$( '.wpe-pcc-information' ).hide();
-	$( '#wpe-pcc-summary' ).empty();
 	$( '#testResults' ).val( '' );
 
-	itemsToScan.plugins.forEach( ( plugin ) => {
+	const include = ( item ) => 'yes' !== mode || 'yes' === item.active;
+
+	itemsToScan.plugins.filter( include ).forEach( ( plugin ) => {
 		window.phpcompat.queue.push( { ...plugin, type: 'plugin' } );
 	} );
 
-	itemsToScan.themes.forEach( ( theme ) => {
+	itemsToScan.themes.filter( include ).forEach( ( theme ) => {
 		window.phpcompat.queue.push( { ...theme, type: 'theme' } );
 	} );
 
@@ -53,7 +68,7 @@ export function limitQueue( ids ) {
 }
 
 export function executeJob( job, cb ) {
-	const endpoint = `https://wptide.org/api/v1/audit/wporg/${ job.type }/${ job.slug }/${ job.version }?reports=phpcs_phpcompatibilitywp`;
+	const endpoint = `https://wptide.org/api/v1/audit/wporg/${ job.type }/${ encodeURIComponent( job.slug ) }/${ encodeURIComponent( job.version ) }?reports=phpcs_phpcompatibilitywp`;
 
 	// Only allow 1 concurrent request at a time
 	if (
@@ -62,11 +77,14 @@ export function executeJob( job, cb ) {
 	) {
 		window.phpcompat.xhr = $.ajax( endpoint, {
 			dataType: 'json',
+			timeout: 30000,
 			beforeSend: () => {
-				const resultItem = $( `#${ job.type }_${ job.slug }` );
-				if ( ! resultItem.find( '.spinner' ).length ) {
-					const spinner = $( '<span class="spinner"></span>' );
-					spinner.show().appendTo( resultItem );
+				if ( ! job.attempts ) {
+					setItemStatus(
+						job,
+						__( 'Scanning…', 'php-compatibility-checker' ),
+						true
+					);
 				}
 			},
 		} )
@@ -76,30 +94,66 @@ export function executeJob( job, cb ) {
 					updateResult( response, job );
 					updateProgress();
 				} else if ( 'pending' === response.status ) {
-					const now = new Date();
-					// Retry in 5 seconds.
-					job.retryAt = new Date( now.getTime() + 5000 );
-					window.phpcompat.queue.push( job );
+					job.attempts = ( job.attempts || 1 ) + 1;
+
+					if ( job.attempts > MAX_ATTEMPTS ) {
+						updateProgress();
+						updateResultFailure(
+							{
+								status: 'skipped',
+								message: sprintf(
+									/* translators: 1: plugin or theme name, 2: version number. */
+									__(
+										'Tide is still auditing %1$s %2$s. Scan it again in a few minutes.',
+										'php-compatibility-checker'
+									),
+									job.name,
+									job.version
+								),
+							},
+							job
+						);
+					} else {
+						showWaiting( job );
+						job.retryAt = new Date(
+							new Date().getTime() + RETRY_DELAY
+						);
+						window.phpcompat.queue.push( job );
+					}
 				} else {
 					updateProgress();
 					// Unexpected behaviour. Stop scanning and display current status.
 					updateResultFailure( response, job );
 				}
 			} )
-			.fail( ( jqXHR ) => {
+			.fail( ( jqXHR, textStatus ) => {
+				// Aborted by "Start over": the scan was reset, so leave the
+				// new scan's progress and results alone.
+				if ( 'abort' === textStatus ) {
+					return;
+				}
+
 				updateProgress();
 
-				// If connection was lost during scan, show error message.
-				if (
-					! jqXHR.responseJSON &&
-					0 === jqXHR.status &&
-					0 === jqXHR.readyState
-				) {
+				if ( 'timeout' === textStatus ) {
 					updateResultFailure(
 						{
 							status: 'failed',
 							message: __(
-								'The audit of this code was interrupted, please scan again.',
+								'WP Tide took too long to respond. Please scan again.',
+								'php-compatibility-checker'
+							),
+						},
+						job
+					);
+				} else if ( 0 === jqXHR.status ) {
+					// No HTTP response: offline, or the request was blocked
+					// (firewall, proxy, or browser extension).
+					updateResultFailure(
+						{
+							status: 'failed',
+							message: __(
+								'Could not connect to WP Tide (wptide.org). Check your internet connection, and that a firewall or browser extension is not blocking it, then scan again.',
 								'php-compatibility-checker'
 							),
 						},
@@ -132,24 +186,65 @@ export function executeJob( job, cb ) {
 					);
 				}
 			} )
-			.always( () => {
-				cb();
+			.always( ( data, textStatus ) => {
+				if ( 'abort' !== textStatus ) {
+					cb();
+				}
 			} );
 	}
+}
+
+/**
+ * Link to WordPress Playground on the latest PHP with every plugin and theme
+ * that had problems pre-installed, so people can see whether they actually run.
+ */
+export function showPlayground() {
+	const problems = window.phpcompat.results.filter(
+		( job ) =>
+			'problems' ===
+			$( `#${ job.type }_${ job.slug }` ).attr( 'data-result' )
+	);
+	if ( ! problems.length ) {
+		return;
+	}
+
+	const params = new URLSearchParams( { php: 'latest' } );
+	problems.forEach( ( job ) => params.append( job.type, job.slug ) );
+
+	$( '#playgroundLink' ).attr(
+		'href',
+		`https://playground.wordpress.net/?${ params.toString() }`
+	);
+	$( '.wpe-pcc-playground' ).show();
+}
+
+/**
+ * Tell the user an item is waiting on Tide rather than stuck.
+ *
+ * @param {Object} job Queued item.
+ */
+function showWaiting( job ) {
+	setItemStatus(
+		job,
+		__(
+			'Tide is auditing this version for the first time. This can take a couple of minutes.',
+			'php-compatibility-checker'
+		),
+		true
+	);
 }
 
 export function runNextJob() {
 	if ( window.phpcompat.queue.length === 0 ) {
 		resetProgress();
 		showDownload();
-		renderSummary();
-
-		// The scan is done: "Start over" begins a new one.
-		$( '.wpe-pcc-toolbar' ).hide();
+		finishResults();
+		$( 'input[type=radio][name=active_plugins]' ).prop( 'disabled', false );
 
 		// Only offer help when something actually failed.
 		if ( $( '[data-result="problems"]' ).length ) {
 			$( '.wpe-pcc-information' ).show();
+			showPlayground();
 		}
 		return;
 	}
@@ -174,90 +269,31 @@ export function runNextJob() {
 
 export function updateProgress() {
 	window.phpcompat.completed++;
-	progress.show();
+	showProgressCount();
+}
+
+function showProgressCount() {
 	progressCount.text(
-		`${ window.phpcompat.completed } of ${ window.phpcompat.total }`
+		sprintf(
+			/* translators: 1: number scanned, 2: total number to scan. */
+			__( '%1$d of %2$d', 'php-compatibility-checker' ),
+			window.phpcompat.completed,
+			window.phpcompat.total
+		)
 	);
+}
+
+/**
+ * Show the spinner and "Now scanning" at the start of a scan.
+ */
+export function startProgress() {
+	$( '.wpe-pcc-spinner' ).show();
+	progress.show();
+	showProgressCount();
 }
 
 function resetProgress() {
 	$( '.wpe-pcc-spinner' ).hide();
 	progressCount.text( '' );
 	progress.hide();
-}
-
-/**
- * One-line summary of the finished scan, e.g. "3 pass · 2 have problems".
- */
-function renderSummary() {
-	const count = ( result ) =>
-		$( `#wpe_pcc_results [data-result="${ result }"]` ).length;
-	const n = {
-		success: count( 'success' ),
-		problems: count( 'problems' ),
-		skipped: count( 'skipped' ),
-		failed: count( 'failed' ),
-	};
-	const parts = [
-		{
-			key: 'success',
-			text: sprintf(
-				/* translators: %d: number of plugins and themes. */
-				_n(
-					'%d passes',
-					'%d pass',
-					n.success,
-					'php-compatibility-checker'
-				),
-				n.success
-			),
-		},
-		{
-			key: 'problems',
-			text: sprintf(
-				/* translators: %d: number of plugins and themes. */
-				_n(
-					'%d has problems',
-					'%d have problems',
-					n.problems,
-					'php-compatibility-checker'
-				),
-				n.problems
-			),
-		},
-		{
-			key: 'skipped',
-			text: sprintf(
-				/* translators: %d: number of plugins and themes. */
-				_n(
-					'%d not checked',
-					'%d not checked',
-					n.skipped,
-					'php-compatibility-checker'
-				),
-				n.skipped
-			),
-		},
-		{
-			key: 'failed',
-			text: sprintf(
-				/* translators: %d: number of plugins and themes. */
-				_n(
-					'%d failed to scan',
-					'%d failed to scan',
-					n.failed,
-					'php-compatibility-checker'
-				),
-				n.failed
-			),
-		},
-	].filter( ( part ) => n[ part.key ] > 0 );
-
-	const summary = $( '#wpe-pcc-summary' ).empty();
-	parts.forEach( ( part ) => {
-		$( '<span>' )
-			.addClass( `wpe-pcc-summary-item wpe-pcc-summary-${ part.key }` )
-			.text( part.text )
-			.appendTo( summary );
-	} );
 }

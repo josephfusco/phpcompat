@@ -2,7 +2,7 @@
 Contributors:      wpengine, octalmage, stevenkword, Taylor4484, pross, jcross, rfmeier, cadic, dkotter, ankit-k-gupta, jeffpaul
 Tags:              php 7, php 8, php, version, compat, compatibility, checker, wp engine, wpe, wpengine
 Requires at least: 5.6
-Tested up to:      6.4
+Tested up to:      7.2
 Stable tag:        1.6.4
 License:           GPLv2 or later
 License URI:       http://www.gnu.org/licenses/gpl-2.0.html
@@ -96,15 +96,20 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 == Changelog ==
 
 = Unreleased =
+- Keep the familiar scan page from 1.6.4, with fixes: a third scan option to choose which plugins and themes to scan (#67), a Cancel link while scanning (#56), a message while Tide audits a new version instead of waiting indefinitely (#42), and clear errors when WP Tide can't be reached (offline, blocked, or timed out) instead of "Status: 0" (#231).
+- Each result shows its error count, and notes when every problem is in a bundled library (vendor, third-party), which is a common source of false positives.
+- Show "Update available" on results when WordPress knows of a newer version, as the scan page has always promised to suggest updates.
+- Reports: Download Report now defaults to PDF, with Text, CSV, and JSON as options. The PDF downloads in one click and is tagged for screen readers (headings, tables with header cells, lists, document language and title, bookmarks). It opens with a summary and recommended next steps, states the scan scope, gives a recommended action for each plugin or theme with problems, and groups repeated problems by message. The text report now starts with the site, date, server PHP, WordPress version, and a summary.
+- Replace the LocalWP suggestion with a link that opens the plugins and themes with problems in WordPress Playground on the latest PHP.
+- Use core's wp.template() and wp.a11y.speak() instead of bundled Mustache and compare-versions.
+- Tested with WordPress 7.2 (beta 3).
 - Check whether the server's PHP is the latest release of a supported branch, using php.net's release data. The scan page shows a notice when a newer (security) release is available, when the branch no longer gets security fixes, or when the server runs a host or distribution build to verify. Also in `wp php-compat php-status` and the `php-status` ability.
 - WP-CLI commands: `wp php-compat scan` (exits 1 when problems are found), `wp php-compat report <slug>`, and `wp php-compat php-status`.
 - Abilities API (WordPress 6.9+): `php-compatibility-checker/scan` and `php-compatibility-checker/php-status`, so AI agents and other clients can check PHP compatibility over REST or MCP. Both require an administrator.
 - Tide results are cached for server-side scans (a week for completed audits).
-- Simpler scan page: every plugin and theme is listed with a checkbox and selected by default, with Select all, Select none, and Active only shortcuts. This replaces the three scan options. Scans now include inactive plugins and themes unless you untick them. After a scan, "Start over" begins a new one.
 - Fix the `phpcompat_plugins_to_scan` filter not running when no plugins are left to scan (for example, when this is the only plugin installed).
-- Refresh the scan page for WordPress 7.2: core SVG icons (with Dashicons fallback on older versions), WordPress design tokens, a status label on each result, PHP versions as chips, a results summary, core buttons and notices, and a layout that stacks on narrow screens.
 - Accessibility: failing PHP versions are buttons with expanded/collapsed state, results don't rely on color alone, and closing a report returns focus to its version.
-- Respect each plugin's and theme's "Requires PHP": PHP versions below it are shown in gray as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.
+- Respect each plugin's and theme's "Requires PHP": PHP versions below it are marked with a dash as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.
 - Fix PHP 8.2 "Creation of dynamic property" deprecation notice.
 - Fix "Undefined array key" warnings when updating plugins from sources other than WordPress.org.
 - Fix translations not loading: use the WordPress.org text domain (php-compatibility-checker) and stop calling load_plugin_textdomain() too early (WordPress 6.7 notice).
