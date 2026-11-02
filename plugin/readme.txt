@@ -92,7 +92,9 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 == Screenshots ==
 
-1. The scan page: scan options, results for each plugin and theme by PHP version, and report downloads.
+1. The scan page: results for each plugin and theme by PHP version, with the problems for a failing version open.
+2. The PDF report: a summary with next steps, then every plugin and theme at a glance.
+3. Site Health: active plugins and themes with problems on newer PHP, including one that needs a newer PHP than it says.
 
 == Changelog ==
 
