@@ -6,6 +6,8 @@
  * batch job, built to stay inside shared-hosting limits:
  *
  * - One request at a time, so a scan never holds more than one PHP worker.
+ * - Pacing: after a slow request (a busy host, often disk I/O on shared
+ *   hosting), it waits a quarter of that time (at most 3 s) before the next.
  * - Adaptive batch size: each request aims to finish in about TARGET_MS. The
  *   size grows while requests are fast and halves after a slow or failed one,
  *   so slow hosts get small requests and fast hosts finish sooner. What's
@@ -19,7 +21,7 @@
  * - Unchanged items aren't rescanned: the first request returns the stored result.
  */
 import apiFetch from '@wordpress/api-fetch';
-import { __, sprintf } from '@wordpress/i18n';
+import { __, _n, sprintf } from '@wordpress/i18n';
 
 /**
  * Error with a message that can be shown to people as is.
@@ -60,9 +62,11 @@ export class BatchError extends Error {
 }
 
 /** Aim for requests this long: far below any host's limit, long enough to be efficient. */
-export const TARGET_MS = 3000;
-/** Most files per request (matches Rest_Controller::SCAN_MAX_FILES). */
-export const MAX_BATCH = 100;
+export const TARGET_MS = 2000;
+/** Most files per request; the server allows up to 100 (Rest_Controller::SCAN_MAX_FILES). */
+export const MAX_BATCH = 50;
+/** After this long without an answer, a request says it's still working. */
+const SLOW_MS = 10000;
 /** Files in the first request. */
 const START_BATCH = 10;
 /** Failed requests in a row (busy site, no connection) before giving up on an item. */
@@ -103,8 +107,8 @@ export function cancelScans() {
 /**
  * Scan one plugin or theme.
  *
- * @param {Object}                 job      Item: type, slug, name, version, source.
- * @param {(text: string) => void} onStatus Called with progress text.
+ * @param {Object}                                                          job      Item: type, slug, name, version, source.
+ * @param {(text: string, progress?: {value: number, max: number}) => void} onStatus Called with progress text and, once the file count is known, files checked so far.
  * @return {Promise<{report: Object, source: string, fingerprint: string, cached: boolean}>} Result.
  */
 export async function scanItem( job, onStatus = () => {} ) {
@@ -164,6 +168,7 @@ async function scanOnce( job, onStatus, signal ) {
 	};
 
 	// Plan: the stored result if nothing changed, otherwise the file count.
+	onStatus( __( 'Preparing…', 'php-compatibility-checker' ) );
 	let plan;
 	while ( ! plan ) {
 		try {
@@ -208,26 +213,46 @@ async function scanOnce( job, onStatus, signal ) {
 	let checked = 0;
 	let fileFailures = 0;
 
-	const status = () =>
-		onStatus(
-			sprintf(
-				/* translators: 1: files checked, 2: total files. */
-				__(
-					'Checking files: %1$d of %2$d…',
-					'php-compatibility-checker'
-				),
-				checked,
-				total
-			)
+	const started = Date.now();
+	let batches = 0;
+	// "Checking files: 150 of 569 · about 2 min left", plus a progress bar.
+	const statusText = () => {
+		const counted = sprintf(
+			/* translators: 1: files checked, 2: total files. */
+			__( 'Checking files: %1$d of %2$d', 'php-compatibility-checker' ),
+			checked,
+			total
 		);
+		// An estimate needs a couple of batches to mean anything.
+		const left =
+			batches >= 2 && checked
+				? timeLeft(
+						( ( total - checked ) * ( Date.now() - started ) ) /
+							checked /
+							1000
+					)
+				: '';
+		return left ? `${ counted } · ${ left }` : `${ counted }…`;
+	};
+	const status = ( note = '' ) =>
+		onStatus( note ? `${ statusText() } · ${ note }` : statusText(), {
+			value: checked,
+			max: total,
+		} );
 	if ( total ) {
 		status();
 	}
 
 	while ( null !== cursor && undefined !== cursor ) {
 		const limit = batchSize;
-		const started = Date.now();
+		const batchStarted = Date.now();
 		let response;
+		// A long request (a slow host, or PHP in the browser on Playground)
+		// says it's still going, so the row doesn't look stuck.
+		const slow = setTimeout(
+			() => status( __( 'still working…', 'php-compatibility-checker' ) ),
+			SLOW_MS
+		);
 
 		try {
 			response = await postBatch(
@@ -272,16 +297,26 @@ async function scanOnce( job, onStatus, signal ) {
 			}
 			await sleep( backoff( 1 ), signal );
 			continue;
+		} finally {
+			clearTimeout( slow );
 		}
 
 		failures = 0;
 		fileFailures = 0;
-		batchSize = nextBatchSize( limit, Date.now() - started );
+		batches++;
+		const took = Date.now() - batchStarted;
+		batchSize = nextBatchSize( limit, took );
 		checked += response.scanned || 0;
 		mergeReport( report, response.report || {} );
 		cursor = response.next;
 		nextPath = response.next_path || '';
 		status();
+
+		// A slow request means a busy host (often disk I/O on shared hosting):
+		// leave it room for visitors before the next one.
+		if ( null !== cursor && undefined !== cursor ) {
+			await sleep( pause( took ), signal );
+		}
 	}
 
 	finishReport( report, config().phpVersions || [] );
@@ -296,8 +331,45 @@ async function scanOnce( job, onStatus, signal ) {
 }
 
 /**
- * The next batch size: scaled toward TARGET_MS, at most doubled or halved
- * per step so one odd request doesn't swing it.
+ * How long to wait after a request before the next: nothing while requests
+ * are on target, then a quarter of a slow request's time (at most 3 s), so a
+ * struggling host isn't kept busy back to back.
+ *
+ * @param {number} took Milliseconds the last request took.
+ * @return {number} Milliseconds to wait.
+ */
+export function pause( took ) {
+	return took > TARGET_MS * 1.5
+		? Math.min( 3000, Math.round( took / 4 ) )
+		: 0;
+}
+
+/**
+ * Rough time left, for people: "less than a minute left", "about 3 min left".
+ *
+ * @param {number} seconds Estimated seconds left.
+ * @return {string} Text.
+ */
+export function timeLeft( seconds ) {
+	if ( seconds < 60 ) {
+		return __( 'less than a minute left', 'php-compatibility-checker' );
+	}
+	const minutes = Math.round( seconds / 60 );
+	return sprintf(
+		/* translators: %d: minutes. */
+		_n(
+			'about %d min left',
+			'about %d min left',
+			minutes,
+			'php-compatibility-checker'
+		),
+		minutes
+	);
+}
+
+/**
+ * The next batch size: scaled toward TARGET_MS, at most 1.5 times larger or
+ * half the size per step, so one odd request doesn't swing it.
  *
  * @param {number} limit   Files requested.
  * @param {number} elapsed Milliseconds the request took.
@@ -306,7 +378,7 @@ async function scanOnce( job, onStatus, signal ) {
 export function nextBatchSize( limit, elapsed ) {
 	const ideal = Math.round( ( limit * TARGET_MS ) / Math.max( elapsed, 1 ) );
 	const bounded = Math.min(
-		limit * 2,
+		Math.ceil( limit * 1.5 ),
 		Math.max( Math.floor( limit / 2 ), ideal )
 	);
 	return Math.min( MAX_BATCH, Math.max( 1, bounded ) );

@@ -114,14 +114,38 @@ export function getSelectedIds() {
  * @param {Object}  job      Queued item.
  * @param {string}  text     Status text.
  * @param {boolean} spinning Show the spinner.
+ * @param {Object}  progress Optional. Files checked so far: value and max.
  */
-export function setItemStatus( job, text, spinning = false ) {
+export function setItemStatus( job, text, spinning = false, progress = null ) {
 	const card = $( `#${ job.type }_${ job.slug }` );
-	card.find( '.wpe-pcc-status' ).text( text );
+	const status = card.find( '.wpe-pcc-status' ).first();
+	status.text( text );
+
+	// Native progress bar (role progressbar, read by screen readers), after the text.
+	let bar = card.find( '.wpe-pcc-item-progress' );
+	if ( progress && progress.max ) {
+		if ( ! bar.length ) {
+			bar = $( '<progress class="wpe-pcc-item-progress"></progress>' )
+				.attr(
+					'aria-label',
+					sprintf(
+						/* translators: %s: plugin or theme name. */
+						__(
+							'Files checked in %s',
+							'php-compatibility-checker'
+						),
+						job.name
+					)
+				)
+				.insertAfter( status );
+		}
+		bar.attr( { max: progress.max, value: progress.value } );
+	}
+
 	if ( spinning && ! card.find( '.spinner' ).length ) {
 		$( '<span class="spinner"></span>' )
 			.show()
-			.insertAfter( card.find( '.wpe-pcc-status' ).first() );
+			.insertAfter( bar.length ? bar : status );
 	}
 }
 

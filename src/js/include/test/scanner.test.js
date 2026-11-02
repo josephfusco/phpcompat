@@ -10,6 +10,8 @@ vi.mock( '@wordpress/api-fetch', () => ( { default: apiFetch } ) );
 const {
 	scanItem,
 	nextBatchSize,
+	timeLeft,
+	pause,
 	backoff,
 	classify,
 	parseJson,
@@ -153,6 +155,26 @@ describe( 'scanItem', () => {
 		expect(
 			calls.slice( 1 ).every( ( c ) => 'abc' === c.fingerprint )
 		).toBe( true );
+	} );
+
+	it( 'reports files checked so far, for the progress bar', async () => {
+		server( files( 25 ) );
+		const updates = [];
+
+		await settle(
+			scanItem( job, ( text, progress ) =>
+				updates.push( { text, progress } )
+			)
+		);
+
+		expect( updates[ 0 ].text ).toBe( 'Preparing…' );
+		const withProgress = updates.filter( ( u ) => u.progress );
+		expect( withProgress[ 0 ].progress ).toEqual( { value: 0, max: 25 } );
+		expect( withProgress[ withProgress.length - 1 ].progress ).toEqual( {
+			value: 25,
+			max: 25,
+		} );
+		expect( withProgress[ 0 ].text ).toBe( 'Checking files: 0 of 25…' );
 	} );
 
 	it( 'returns a stored result when the site says the item is unchanged', async () => {
@@ -344,12 +366,24 @@ describe( 'scanItem', () => {
 
 describe( 'batch sizing', () => {
 	it( 'grows when fast, shrinks when slow, within bounds', () => {
-		expect( nextBatchSize( 10, 500 ) ).toBe( 20 ); // At most doubled.
-		expect( nextBatchSize( 10, 3000 ) ).toBe( 10 );
-		expect( nextBatchSize( 10, 4000 ) ).toBe( 8 );
+		expect( nextBatchSize( 10, 500 ) ).toBe( 15 ); // At most 1.5 times larger.
+		expect( nextBatchSize( 10, 2000 ) ).toBe( 10 ); // On target (2 s).
+		expect( nextBatchSize( 10, 4000 ) ).toBe( 5 );
 		expect( nextBatchSize( 10, 60000 ) ).toBe( 5 ); // At most halved.
 		expect( nextBatchSize( 1, 60000 ) ).toBe( 1 );
 		expect( nextBatchSize( MAX_BATCH, 1 ) ).toBe( MAX_BATCH );
+	} );
+
+	it( 'paces only after slow requests', () => {
+		expect( pause( 1500 ) ).toBe( 0 ); // On target: no pause.
+		expect( pause( 3000 ) ).toBe( 0 );
+		expect( pause( 4000 ) ).toBe( 1000 ); // Slow: a quarter of it.
+		expect( pause( 60000 ) ).toBe( 3000 ); // Capped.
+	} );
+
+	it( 'estimates time left in words', () => {
+		expect( timeLeft( 20 ) ).toBe( 'less than a minute left' );
+		expect( timeLeft( 150 ) ).toBe( 'about 3 min left' );
 	} );
 
 	it( 'backs off exponentially with jitter, capped', () => {

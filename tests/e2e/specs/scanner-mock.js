@@ -30,7 +30,7 @@ async function mockScanner( page, { fail = {}, hold = [] } = {} ) {
 				{ onStatus, ScanError }
 			) => {
 				window.phpcompatScanned( job.slug );
-				onStatus( 'Checking PHP 7.4, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5…' );
+				onStatus( 'Checking files: 3 of 10…', { value: 3, max: 10 } );
 				if ( held.includes( job.slug ) ) {
 					await gate;
 				}

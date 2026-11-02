@@ -30,7 +30,9 @@ The results also feed:
 Scanning is a resumable batch job, using the usual patterns for that:
 
 - **One request in flight**, so a scan holds at most one PHP worker.
-- **Adaptive batch size**: grows while requests are fast, halves after a slow or failed one. The server also caps every batch (100 files, 1 MB).
+- **Adaptive batch size**: aims for about 2 seconds per request, grows (at most 1.5×) while requests are fast, halves after a slow or failed one. The server also caps every batch (100 files, 1 MB). Request time includes waiting on disk, so hosts with limited I/O get smaller batches.
+- **Pacing**: after a slow request, it waits a quarter of that time (at most 3 seconds) before the next, so a busy host has room for visitors.
+- **Progress you can see**: each item shows files checked, a progress bar, an estimate of the time left, and "still working…" if one request takes longer than 10 seconds.
 - **Retries with exponential backoff and jitter** on 429, 503, timeouts, and dropped connections, honoring `Retry-After`.
 - **Poison-file isolation**: a batch that crashes PHP (memory, time) is split until the file causing it is found; that file is skipped and listed. If more than a few files crash, the item fails instead of passing.
 - **Optimistic concurrency**: if an item's files change mid-scan, the server answers 409 and the item starts again.
