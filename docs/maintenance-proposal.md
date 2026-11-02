@@ -15,7 +15,9 @@ Try it in one click: [2.0.0 beta in WordPress Playground](https://playground.wor
 
 ## What maintaining it would take
 
-My estimate, not yet measured: a few hours a month to review scanner updates and triage issues, plus a day or two each year to add a new PHP version. There's no service to run. Joe Fusco and the headless-oss team would maintain it.
+My estimate, not yet measured: a few hours a month to review scanner updates and triage issues, plus a day or two each year to add a new PHP version. There's no service to run. The headless-oss team would maintain it.
+
+"Support" here means releases (security fixes, new PHP versions, WordPress compatibility) and answering the WordPress.org forum and GitHub issues. It doesn't add work for WP Engine Support.
 
 ## Open questions
 
