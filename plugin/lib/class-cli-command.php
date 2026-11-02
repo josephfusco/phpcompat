@@ -235,6 +235,18 @@ class CLI_Command {
 			$status['latest_is_security']   = $release['latest_is_security'];
 			$status['security_support_end'] = $release['security_support_end'];
 			$status['release_message']      = $release['message'];
+			foreach ( $release['advisories'] as $advisory ) {
+				$label = Php_Releases::label( $advisory );
+				if ( ! empty( $advisory['conditions'] ) ) {
+					$status[ 'advisory: ' . $advisory['id'] ] = $label . ' — ' . $advisory['mitigation'];
+				} else {
+					$status[ 'advisory: ' . $advisory['id'] ] = $advisory['fixed_in']
+						/* translators: 1: vulnerability name and CVE IDs, 2: fixed PHP version. */
+						? sprintf( __( '%1$s — fixed in %2$s', 'php-compatibility-checker' ), $label, $advisory['fixed_in'] )
+						/* translators: %s: vulnerability name and CVE IDs. */
+						: sprintf( __( '%s — no official fix for this version', 'php-compatibility-checker' ), $label );
+				}
+			}
 
 			$rows = array();
 			foreach ( $status as $key => $value ) {

@@ -286,11 +286,11 @@ class Abilities {
 				'message'             => array( 'type' => 'string' ),
 				'release'             => array(
 					'type'        => 'object',
-					'description' => __( 'Whether this is the latest PHP release of a supported branch, from php.net. state: up_to_date, update_available, unsupported_branch, vendor_build (host or distribution build that may include backported fixes), or unknown.', 'php-compatibility-checker' ),
+					'description' => __( 'Whether this is the latest PHP release of a supported branch, from php.net. state: vulnerable (affected by a critical advisory; see advisories), up_to_date, update_available, unsupported_branch, vendor_build (host or distribution build that may include backported fixes), or unknown.', 'php-compatibility-checker' ),
 					'properties'  => array(
 						'state'                => array(
 							'type' => 'string',
-							'enum' => array( 'up_to_date', 'update_available', 'unsupported_branch', 'vendor_build', 'unknown' ),
+							'enum' => array( 'vulnerable', 'up_to_date', 'update_available', 'unsupported_branch', 'vendor_build', 'unknown' ),
 						),
 						'current'              => array( 'type' => 'string' ),
 						'branch'               => array( 'type' => 'string' ),
@@ -303,6 +303,25 @@ class Abilities {
 							'items' => array( 'type' => 'string' ),
 						),
 						'message'              => array( 'type' => 'string' ),
+						'advisories'           => array(
+							'type'        => 'array',
+							'description' => __( 'Critical PHP security advisories that affect this server. fixed_in is the release that fixes it for this branch (empty if none). Advisories with conditions depend on PHP settings; follow mitigation.', 'php-compatibility-checker' ),
+							'items'       => array(
+								'type'       => 'object',
+								'properties' => array(
+									'id'         => array( 'type' => 'string' ),
+									'name'       => array( 'type' => 'string' ),
+									'cves'       => array(
+										'type'  => 'array',
+										'items' => array( 'type' => 'string' ),
+									),
+									'url'        => array( 'type' => 'string' ),
+									'exploited'  => array( 'type' => 'boolean' ),
+									'fixed_in'   => array( 'type' => 'string' ),
+									'mitigation' => array( 'type' => 'string' ),
+								),
+							),
+						),
 					),
 				),
 			),

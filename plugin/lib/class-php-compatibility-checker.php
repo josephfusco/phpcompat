@@ -483,6 +483,9 @@ class PHP_Compatibility_Checker {
 								);
 								// The page notice has the full release message; keep this short.
 								switch ( $release['state'] ) {
+									case 'vulnerable':
+										$php_status = __( 'It has a critical security flaw that attackers are exploiting. Update PHP now.', 'php-compatibility-checker' );
+										break;
 									case 'update_available':
 										/* translators: %s: latest PHP release, e.g. 8.3.36 */
 										$php_status = sprintf( __( 'PHP %s is available.', 'php-compatibility-checker' ), $release['latest'] );
@@ -602,21 +605,58 @@ class PHP_Compatibility_Checker {
 	 */
 	public function release_notice( $release ) {
 		$types = array(
+			'vulnerable'         => 'error',
 			'update_available'   => 'warning',
 			'unsupported_branch' => 'error',
 			'vendor_build'       => 'info',
 		);
 
-		if ( ! isset( $types[ $release['state'] ] ) ) {
-			return;
+		if ( isset( $types[ $release['state'] ] ) ) {
+			$links = array();
+			foreach ( isset( $release['advisories'] ) ? $release['advisories'] : array() as $advisory ) {
+				if ( empty( $advisory['conditions'] ) ) {
+					$links[] = sprintf(
+						'<a href="%1$s" target="_blank" rel="noopener noreferrer">%2$s</a>',
+						esc_url( $advisory['url'] ),
+						esc_html(
+							sprintf(
+								/* translators: %s: vulnerability name and CVE IDs. */
+								__( 'About %s', 'php-compatibility-checker' ),
+								Php_Releases::label( $advisory )
+							)
+						)
+					);
+				}
+			}
+
+			printf(
+				'<div class="notice notice-%1$s inline wpe-pcc-release-notice"><p><strong>%2$s</strong> %3$s%4$s</p></div>',
+				esc_attr( $types[ $release['state'] ] ),
+				esc_html__( 'Server PHP:', 'php-compatibility-checker' ),
+				esc_html( $release['message'] ),
+				$links ? ' ' . implode( ' · ', $links ) : '' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
+			);
 		}
 
-		printf(
-			'<div class="notice notice-%1$s inline wpe-pcc-release-notice"><p><strong>%2$s</strong> %3$s</p></div>',
-			esc_attr( $types[ $release['state'] ] ),
-			esc_html__( 'Server PHP:', 'php-compatibility-checker' ),
-			esc_html( $release['message'] )
-		);
+		// Configuration-dependent advisories: show the workaround.
+		foreach ( isset( $release['advisories'] ) ? $release['advisories'] : array() as $advisory ) {
+			if ( empty( $advisory['conditions'] ) || empty( $advisory['mitigation'] ) ) {
+				continue;
+			}
+			printf(
+				'<div class="notice notice-warning inline wpe-pcc-release-notice"><p><strong>%1$s</strong> %2$s <a href="%3$s" target="_blank" rel="noopener noreferrer">%4$s</a></p></div>',
+				esc_html(
+					sprintf(
+						/* translators: %s: CVE IDs. */
+						__( 'This server\'s PHP settings are exposed to %s.', 'php-compatibility-checker' ),
+						Php_Releases::label( $advisory )
+					)
+				),
+				esc_html( $advisory['mitigation'] ),
+				esc_url( $advisory['url'] ),
+				esc_html__( 'Read more', 'php-compatibility-checker' )
+			);
+		}
 	}
 
 	/**
