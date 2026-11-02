@@ -252,6 +252,41 @@ test.describe( 'PHP Compatibility scan', () => {
 		await expect( results( page, 'problems' ) ).toHaveCount( 1 );
 	} );
 
+	test( 'lets one scan run at a time on the site', async ( {
+		requestUtils,
+	} ) => {
+		const batch = ( token ) =>
+			requestUtils.rest( {
+				method: 'POST',
+				path: '/php-compat/v1/scan-batch',
+				data: {
+					type: 'plugin',
+					slug: 'passing-plugin',
+					limit: 0,
+					scan_token: token,
+				},
+			} );
+		const first = 'a'.repeat( 32 );
+		const second = 'b'.repeat( 32 );
+
+		await batch( first );
+		// A second scan (another admin or tab) is refused while the first runs.
+		const refused = await batch( second ).catch( ( error ) => error );
+		expect( refused.code ).toBe( 'phpcompat_scan_running' );
+
+		// Once the first lets go, the second can start.
+		await requestUtils.rest( {
+			method: 'DELETE',
+			path: `/php-compat/v1/scan-lock?scan_token=${ first }`,
+		} );
+		const allowed = await batch( second );
+		expect( allowed.cached ).toBe( false );
+		await requestUtils.rest( {
+			method: 'DELETE',
+			path: `/php-compat/v1/scan-lock?scan_token=${ second }`,
+		} );
+	} );
+
 	test( 'refuses scan requests from people who are not logged in', async ( {
 		playwright,
 	} ) => {

@@ -170,6 +170,36 @@ class Scanner_Bundle {
 	}
 
 	/**
+	 * Pass 1 for some files: which have a problem on any PHP version checked.
+	 * With a deadline, it stops after the file that passes it (at least one file).
+	 *
+	 * @param string     $base     Directory the paths are relative to.
+	 * @param string[]   $files    Relative paths.
+	 * @param float|null $deadline Optional. microtime( true ) to stop at.
+	 * @return array { @type string[] $flagged Absolute paths of flagged files. @type int $checked Files checked, from the start. }
+	 * @throws \RuntimeException When the scanner is missing.
+	 */
+	public static function flag_files( string $base, array $files, ?float $deadline = null ): array {
+		self::load();
+
+		return \WPEngine_PHPCompat\Bundle\flag_files( $base, $files, self::PHP_VERSIONS, $deadline );
+	}
+
+	/**
+	 * Pass 2: the report for each PHP version, for flagged files only.
+	 *
+	 * @param string   $base    Directory paths in the report are relative to.
+	 * @param string[] $flagged Absolute paths from flag_files().
+	 * @return array Report (see Results::sanitize_report()).
+	 * @throws \RuntimeException When the scanner is missing.
+	 */
+	public static function report_flagged( string $base, array $flagged ): array {
+		self::load();
+
+		return \WPEngine_PHPCompat\Bundle\report_flagged( $base, $flagged, self::PHP_VERSIONS );
+	}
+
+	/**
 	 * Load runner.php.
 	 *
 	 * @throws \RuntimeException When the scanner is missing.

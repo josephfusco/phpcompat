@@ -135,4 +135,31 @@ class RunnerTest extends TestCase {
 
 		$this->assertSame( array( '8.0' ), $report['compatible'] );
 	}
+
+	public function test_pass_one_stops_at_a_deadline_after_at_least_one_file() {
+		$base  = __DIR__ . '/fixtures/sample-plugin';
+		$files = array( 'sample-plugin.php', 'includes/legacy.php' );
+
+		// A deadline already passed: still checks one file, then stops.
+		$early = Bundle\flag_files( $base, $files, array( '7.4', '8.0' ), microtime( true ) - 1 );
+		$this->assertSame( 1, $early['checked'] );
+
+		// No deadline: every file, and the one with each() is flagged.
+		$all = Bundle\flag_files( $base, $files, array( '7.4', '8.0' ) );
+		$this->assertSame( 2, $all['checked'] );
+		$this->assertCount( 1, $all['flagged'] );
+		$this->assertStringEndsWith( 'includes/legacy.php', str_replace( '\\', '/', $all['flagged'][0] ) );
+	}
+
+	public function test_reusing_the_engine_across_passes_gives_the_same_results() {
+		$base = __DIR__ . '/fixtures/sample-plugin';
+
+		// Run several passes with different versions first, then compare with the
+		// result computed once at the start: state from one pass must not leak into the next.
+		Bundle\scan_files( $base, array( 'includes/legacy.php' ), array( '8.4' ) );
+		Bundle\scan_files( $base, array( 'includes/legacy.php' ), array( '7.4' ) );
+		$again = Bundle\scan( $base, array( '7.4', '8.0', '8.4' ) );
+
+		$this->assertSame( self::$report, $again );
+	}
 }

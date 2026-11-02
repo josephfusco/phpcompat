@@ -204,6 +204,7 @@ function uninstall() {
 	cleanup_updater_data();
 	delete_option( 'wpephpcompat_legacy_cleaned' );
 	delete_option( 'wpephpcompat_version' );
+	delete_option( Scan_Lock::OPTION );
 	Results::delete_all();
 	Rest_Controller::delete_transients();
 }
