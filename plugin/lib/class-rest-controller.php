@@ -1,6 +1,6 @@
 <?php
 /**
- * REST API for the browser scanner.
+ * REST API for the scan page.
  *
  * @package WPEngine_PHPCompat
  */
@@ -17,16 +17,26 @@ use WP_REST_Server;
 /**
  * Routes under php-compat/v1:
  *
- * - GET  /files   PHP files of one installed plugin or theme, in small batches,
- *                 for code that isn't on WordPress.org (premium, custom, or a
- *                 version WordPress.org doesn't have).
- * - POST /results Store the browser's scan result for one plugin or theme.
+ * - POST /scan-batch Scan the next few PHP files of one plugin or theme.
+ * - POST /results    Store the merged result of a finished scan.
  *
- * Both need the plugin's capability (manage_options). Reading files also
- * needs the right to see that code anyway: network admin on multisite, and
- * permission to edit or install plugins (or themes) on a single site. Items
- * are looked up from the installed plugin and theme lists; no path from the
- * request is ever used to open a file.
+ * Scanning is a resumable batch job, driven by the browser so no request runs
+ * long enough to hit a shared host's time, memory, or worker limits:
+ *
+ * - The browser sends one request at a time, so a scan uses at most one PHP
+ *   worker. It sizes each batch to finish in a few seconds, shrinks it after
+ *   a slow or failed request, retries with backoff, and skips a file that
+ *   fails on its own instead of failing the whole item.
+ * - Each request is also capped here (files, bytes), whatever the browser asks.
+ * - The cursor is an index into the item's sorted file list. The list has a
+ *   fingerprint (paths, sizes, modification times); if the files change mid-scan,
+ *   the request fails with 409 and the browser starts that item again.
+ * - The fingerprint is stored with the result, so an unchanged item isn't
+ *   scanned again: the first request returns the stored result.
+ *
+ * Both need the plugin's capability (manage_options). Items are looked up from
+ * the installed plugin and theme lists; no path from the request is used to
+ * open a file. Responses carry compatibility messages, never file contents.
  */
 class Rest_Controller {
 
@@ -36,25 +46,24 @@ class Rest_Controller {
 	const ROUTE_NAMESPACE = 'php-compat/v1';
 
 	/**
-	 * Most bytes of file content per /files response. Small batches keep each
-	 * request short and spread disk reads out on hosts with limited I/O.
+	 * Most files per scan request, whatever the browser asks for.
 	 */
-	const BATCH_BYTES = 524288; // 512 KB.
+	const SCAN_MAX_FILES = 100;
 
 	/**
-	 * Most files per /files response.
+	 * Most bytes of PHP per scan request (at least one file is always scanned).
 	 */
-	const BATCH_FILES = 200;
+	const SCAN_MAX_BYTES = 1048576; // 1 MB.
 
 	/**
-	 * Files bigger than this are skipped (generated or data files, not code to check).
+	 * Default files per scan request, when the browser doesn't say.
 	 */
-	const MAX_FILE_BYTES = 1048576; // 1 MB.
+	const SCAN_DEFAULT_FILES = 10;
 
 	/**
-	 * Most PHP files listed for one item.
+	 * How long an item's file list is kept between the requests of one scan.
 	 */
-	const MAX_FILES = 20000;
+	const LIST_TTL = HOUR_IN_SECONDS;
 
 	/**
 	 * Source of the installed plugin and theme lists.
@@ -89,21 +98,35 @@ class Rest_Controller {
 			),
 		);
 
+		$fingerprint = array(
+			'type'    => 'string',
+			'pattern' => '^[a-f0-9]{0,32}$',
+			'default' => '',
+		);
+
 		register_rest_route(
 			self::ROUTE_NAMESPACE,
-			'/files',
+			'/scan-batch',
 			array(
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => array( $this, 'get_files' ),
-				'permission_callback' => array( $this, 'can_read_files' ),
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'scan_batch' ),
+				'permission_callback' => array( $this, 'can_scan' ),
 				'args'                => array_merge(
 					$item_args,
 					array(
-						'cursor' => array(
+						'cursor'      => array(
 							'type'    => 'integer',
 							'minimum' => 0,
 							'default' => 0,
 						),
+						// 0 only plans: the stored result if nothing changed, else the file count.
+						'limit'       => array(
+							'type'    => 'integer',
+							'minimum' => 0,
+							'maximum' => self::SCAN_MAX_FILES,
+							'default' => self::SCAN_DEFAULT_FILES,
+						),
+						'fingerprint' => $fingerprint,
 					)
 				),
 			)
@@ -119,20 +142,21 @@ class Rest_Controller {
 				'args'                => array_merge(
 					$item_args,
 					array(
-						'version' => array(
+						'version'     => array(
 							'type'     => 'string',
 							'required' => true,
 						),
-						'ruleset' => array(
+						'ruleset'     => array(
 							'type'     => 'string',
 							'required' => true,
 						),
-						'source'  => array(
+						'source'      => array(
 							'type'     => 'string',
 							'enum'     => array( 'wporg', 'local' ),
 							'required' => true,
 						),
-						'report'  => array(
+						'fingerprint' => $fingerprint,
+						'report'      => array(
 							'type'     => 'object',
 							'required' => true,
 						),
@@ -152,52 +176,41 @@ class Rest_Controller {
 	}
 
 	/**
-	 * Permission check for reading source files.
-	 *
-	 * Someone who may scan isn't necessarily allowed to read every plugin's
-	 * code: sub-site admins on multisite can't, nor can admins on sites that
-	 * turn off file editing and installs (DISALLOW_FILE_EDIT and DISALLOW_FILE_MODS).
-	 *
-	 * @param WP_REST_Request $request Request.
-	 * @return bool|WP_Error
-	 */
-	public function can_read_files( WP_REST_Request $request ) {
-		if ( ! $this->can_scan() ) {
-			return false;
-		}
-
-		$theme   = 'theme' === $request['type'];
-		$allowed = is_multisite()
-			? current_user_can( $theme ? 'manage_network_themes' : 'manage_network_plugins' )
-			: current_user_can( $theme ? 'edit_themes' : 'edit_plugins' ) || current_user_can( $theme ? 'install_themes' : 'install_plugins' );
-
-		if ( ! $allowed ) {
-			return new WP_Error(
-				'phpcompat_cannot_read_files',
-				__( 'You aren\'t allowed to read this plugin\'s or theme\'s files, so it can\'t be scanned here. A network administrator can scan it, or run wp php-compat scan.', 'php-compatibility-checker' ),
-				array( 'status' => rest_authorization_required_code() )
-			);
-		}
-
-		return true;
-	}
-
-	/**
-	 * GET /files: a batch of an item's PHP files.
+	 * POST /scan-batch: scan the next batch of an item's PHP files.
 	 *
 	 * @param WP_REST_Request $request Request.
 	 * @return WP_REST_Response|WP_Error {
-	 *     @type array[]  $files   Each with path (relative to the item) and content (base64).
-	 *     @type int|null $next    Cursor for the next batch, or null when done.
-	 *     @type int      $total   Number of PHP files.
-	 *     @type string[] $skipped   Files left out because they are too big (first batch only).
-	 *     @type bool     $truncated Whether there were more PHP files than MAX_FILES (first batch only).
+	 * With limit 0, nothing is scanned: the response only plans the scan.
+	 *
+	 *     @type bool     $cached      True when the item is unchanged since its stored
+	 *                                 result; then only $result is set.
+	 *     @type array    $result      The stored result (when cached).
+	 *     @type array    $report      Report for this batch (see Results::sanitize_report()).
+	 *     @type int      $scanned     Files in this batch.
+	 *     @type int|null $next        Cursor for the next batch, or null when done.
+	 *     @type string   $next_path   Path of the file at $next, so the browser can name it if it has to skip it.
+	 *     @type int      $total       Number of PHP files.
+	 *     @type string   $fingerprint Fingerprint of the file list; send it back with later batches.
+	 *     @type string[] $skipped     Files left out because they are too big.
+	 *     @type bool     $truncated   Whether there were more PHP files than Scanner::MAX_FILES.
+	 *     @type string   $platform_php PHP version the item's Composer dependencies require, or ''.
 	 * }
 	 */
-	public function get_files( WP_REST_Request $request ) {
+	public function scan_batch( WP_REST_Request $request ) {
 		$item = $this->find_item( (string) $request['type'], (string) $request['slug'] );
 		if ( ! $item ) {
 			return new WP_Error( 'phpcompat_unknown_item', __( 'That plugin or theme isn\'t installed.', 'php-compatibility-checker' ), array( 'status' => 404 ) );
+		}
+
+		$cursor = (int) $request['cursor'];
+
+		// Same hook as WP-CLI: a host can supply reports it already has.
+		if ( 0 === $cursor ) {
+			/** This filter is documented in plugin/lib/class-scanner.php */
+			$report = apply_filters( 'wpephpcompat_pre_scan_report', null, $item );
+			if ( is_array( $report ) ) {
+				return new WP_REST_Response( $this->batch_response( Results::sanitize_report( $report ), 0, null, '', Scanner::empty_file_list() ) );
+			}
 		}
 
 		$root = Scanner::item_root( $item );
@@ -205,38 +218,126 @@ class Rest_Controller {
 			return new WP_Error( 'phpcompat_no_files', __( 'Couldn\'t find this plugin\'s or theme\'s files.', 'php-compatibility-checker' ), array( 'status' => 404 ) );
 		}
 
-		$list   = $this->list_files( $item, $root );
-		$cursor = (int) $request['cursor'];
-		$files  = array();
-		$bytes  = 0;
-		$count  = count( $list['files'] );
+		// A new scan always looks at the files as they are now.
+		$list        = $this->file_list( $item, $root, 0 === $cursor );
+		$fingerprint = (string) $request['fingerprint'];
 
-		for ( $i = $cursor; $i < $count; $i++ ) {
-			if ( count( $files ) >= self::BATCH_FILES || ( $files && $bytes >= self::BATCH_BYTES ) ) {
-				break;
+		if ( '' !== $fingerprint && ! hash_equals( $list['fingerprint'], $fingerprint ) ) {
+			return new WP_Error( 'phpcompat_files_changed', __( 'This plugin\'s or theme\'s files changed during the scan. Scanning it again.', 'php-compatibility-checker' ), array( 'status' => 409 ) );
+		}
+
+		if ( 0 === $cursor ) {
+			$stored = ( new Results() )->get( $item );
+			if ( $stored && ! empty( $stored['fingerprint'] ) && hash_equals( (string) $stored['fingerprint'], $list['fingerprint'] ) ) {
+				return new WP_REST_Response(
+					array(
+						'cached' => true,
+						'result' => $stored,
+					)
+				);
 			}
+		}
 
-			$relative = $list['files'][ $i ];
-			$content  = $this->read_file( $root, $relative );
-			if ( null === $content ) {
-				continue;
-			}
+		if ( 0 === $cursor && ! Scanner_Bundle::verify() ) {
+			return new WP_Error( 'phpcompat_no_scanner', __( 'The scanner in this copy of the plugin is missing or incomplete. Reinstall the plugin.', 'php-compatibility-checker' ), array( 'status' => 500 ) );
+		}
 
-			$files[] = array(
-				'path'    => $relative,
-				'content' => base64_encode( $content ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Binary-safe transport of source files.
-			);
-			$bytes  += strlen( $content );
+		if ( 0 === (int) $request['limit'] ) {
+			return new WP_REST_Response( $this->batch_response( array( 'versions' => array() ), 0, $cursor < count( $list['files'] ) ? $cursor : null, $list['files'][ $cursor ] ?? '', $list ) );
+		}
+
+		$base  = is_file( $root ) ? dirname( $root ) : $root;
+		$batch = self::select_batch( $base, $list['files'], $cursor, (int) $request['limit'] );
+
+		$this->prepare_for_scan();
+
+		try {
+			$report = $batch['files'] ? Scanner_Bundle::scan_files( $base, $batch['files'] ) : array( 'versions' => array() );
+		} catch ( \Throwable $e ) {
+			return new WP_Error( 'phpcompat_scan_failed', $e->getMessage(), array( 'status' => 500 ) );
 		}
 
 		return new WP_REST_Response(
-			array(
-				'files'     => $files,
-				'next'      => $i < $count ? $i : null,
-				'total'     => $count,
-				'skipped'   => 0 === $cursor ? $list['skipped'] : array(),
-				'truncated' => 0 === $cursor && ! empty( $list['truncated'] ),
+			$this->batch_response(
+				Results::sanitize_report( $report ),
+				count( $batch['files'] ),
+				$batch['next'],
+				null === $batch['next'] ? '' : $list['files'][ $batch['next'] ],
+				$list
 			)
+		);
+	}
+
+	/**
+	 * The files of the next batch: at most $limit files and SCAN_MAX_BYTES, but at least one.
+	 *
+	 * @param string   $base   Directory the paths are relative to.
+	 * @param string[] $paths  Relative paths.
+	 * @param int      $cursor Index to start at.
+	 * @param int      $limit  Most files.
+	 * @return array { @type string[] $files Relative paths. @type int|null $next Next cursor, or null when done. }
+	 */
+	public static function select_batch( string $base, array $paths, int $cursor, int $limit ): array {
+		$limit = max( 1, min( self::SCAN_MAX_FILES, $limit ) );
+		$count = count( $paths );
+		$files = array();
+		$bytes = 0;
+
+		for ( $i = $cursor; $i < $count; $i++ ) {
+			if ( count( $files ) >= $limit || ( $files && $bytes >= self::SCAN_MAX_BYTES ) ) {
+				break;
+			}
+			$size = @filesize( $base . '/' . $paths[ $i ] ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Size estimate only; a missing file is skipped by the scanner.
+			if ( $files && false !== $size && $bytes + $size > self::SCAN_MAX_BYTES ) {
+				break;
+			}
+			$files[] = $paths[ $i ];
+			$bytes  += false === $size ? 0 : $size;
+		}
+
+		return array(
+			'files' => $files,
+			'next'  => $i < $count ? $i : null,
+		);
+	}
+
+	/**
+	 * Give the scan as much room as the host allows. The batch size keeps it
+	 * well inside the limits; this is headroom for a slow moment.
+	 */
+	private function prepare_for_scan(): void {
+		wp_raise_memory_limit( 'admin' );
+
+		if ( function_exists( 'set_time_limit' ) && false === strpos( (string) ini_get( 'disable_functions' ), 'set_time_limit' ) ) {
+			set_time_limit( 60 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Headroom for a slow batch; most take a few seconds.
+		}
+
+		// A notice printed before the JSON would break the response.
+		ini_set( 'display_errors', '0' ); // phpcs:ignore WordPress.PHP.IniSet.display_errors_Disallowed -- Keep the JSON response clean.
+	}
+
+	/**
+	 * Response for one batch.
+	 *
+	 * @param array    $report    Sanitized report.
+	 * @param int      $scanned   Files in the batch.
+	 * @param int|null $next      Next cursor.
+	 * @param string   $next_path Path at $next.
+	 * @param array    $files     File list (see Scanner::file_list()).
+	 * @return array
+	 */
+	private function batch_response( array $report, int $scanned, ?int $next, string $next_path, array $files ): array {
+		return array(
+			'cached'       => false,
+			'report'       => $report,
+			'scanned'      => $scanned,
+			'next'         => $next,
+			'next_path'    => $next_path,
+			'total'        => count( $files['files'] ),
+			'fingerprint'  => $files['fingerprint'],
+			'skipped'      => $files['skipped'],
+			'truncated'    => $files['truncated'],
+			'platform_php' => $files['platform_php'] ?? '',
 		);
 	}
 
@@ -257,8 +358,6 @@ class Rest_Controller {
 			return new WP_Error( 'phpcompat_stale_result', __( 'This result is for a different version. Scan again.', 'php-compatibility-checker' ), array( 'status' => 409 ) );
 		}
 
-		// Only code from WordPress.org is reused without rescanning, so only believe
-		// "wporg" for items WordPress.org actually hosts.
 		$source = 'wporg' === $request['source'] && 'wporg' === $item['source'] ? 'wporg' : 'local';
 
 		// Measure what would be stored (capped and cleaned), not what was sent.
@@ -267,7 +366,16 @@ class Rest_Controller {
 			return new WP_Error( 'phpcompat_too_large', __( 'The scan result is too large to store.', 'php-compatibility-checker' ), array( 'status' => 413 ) );
 		}
 
-		$stored = ( new Results() )->save( $item, $report, $source );
+		// Only keep a fingerprint this server computed for the scan, so a result
+		// is reused only while the files really are unchanged.
+		$fingerprint = (string) $request['fingerprint'];
+		$root        = '' !== $fingerprint ? Scanner::item_root( $item ) : '';
+		$list        = '' !== $root ? $this->file_list( $item, $root, false ) : null;
+		if ( ! $list || ! hash_equals( $list['fingerprint'], $fingerprint ) ) {
+			$fingerprint = '';
+		}
+
+		$stored = ( new Results() )->save( $item, $report, $source, $fingerprint );
 
 		return new WP_REST_Response( $stored );
 	}
@@ -289,72 +397,43 @@ class Rest_Controller {
 	}
 
 	/**
-	 * Sorted PHP files of an item, cached briefly so batches don't re-walk the tree.
-	 *
-	 * @param array  $item Item.
-	 * @param string $root Real path from item_root().
-	 * @return array { @type string[] $files Relative paths. @type string[] $skipped Too big. }
+	 * Delete the kept file lists and the scanner check, e.g. on uninstall.
 	 */
-	private function list_files( array $item, string $root ): array {
-		$key    = 'wpephpcompat_files_' . md5( $item['type'] . '|' . $item['slug'] . '|' . $item['version'] . '|' . $root );
-		$cached = get_transient( $key );
-		if ( is_array( $cached ) ) {
-			return $cached;
-		}
+	public static function delete_transients(): void {
+		global $wpdb;
 
-		$list = array(
-			'files'     => array(),
-			'skipped'   => array(),
-			'truncated' => false,
+		delete_transient( 'wpephpcompat_scanner_ok' );
+
+		$names = $wpdb->get_col( // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- One-off cleanup; transients have no API to list by prefix.
+			$wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like( '_transient_wpephpcompat_files_' ) . '%' )
 		);
 
-		if ( is_file( $root ) ) {
-			$list['files'][] = basename( $root );
-		} else {
-			// Doesn't follow symlinked directories, so the walk stays inside the item.
-			$iterator = new \RecursiveIteratorIterator(
-				new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::UNIX_PATHS )
-			);
-			foreach ( $iterator as $file ) {
-				if ( count( $list['files'] ) >= self::MAX_FILES ) {
-					$list['truncated'] = true;
-					break;
-				}
-				if ( $file->isLink() || ! $file->isFile() || 'php' !== strtolower( $file->getExtension() ) ) {
-					continue;
-				}
-				$relative = substr( $file->getPathname(), strlen( $root ) + 1 );
-				if ( $file->getSize() > self::MAX_FILE_BYTES ) {
-					$list['skipped'][] = $relative;
-					continue;
-				}
-				$list['files'][] = $relative;
-			}
-			sort( $list['files'] );
+		foreach ( $names as $name ) {
+			delete_transient( substr( $name, strlen( '_transient_' ) ) );
 		}
-
-		set_transient( $key, $list, 10 * MINUTE_IN_SECONDS );
-
-		return $list;
 	}
 
 	/**
-	 * Read one file, only if it really is inside the item.
+	 * An item's file list, kept between the batches of one scan.
 	 *
-	 * @param string $root     Real path from item_root().
-	 * @param string $relative Relative path from list_files().
-	 * @return string|null Content, or null if it can't be read safely.
+	 * @param array  $item    Item.
+	 * @param string $root    Real path from item_root().
+	 * @param bool   $refresh Walk the files again instead of using the kept list.
+	 * @return array See Scanner::file_list().
 	 */
-	private function read_file( string $root, string $relative ): ?string {
-		$path = is_file( $root ) ? $root : $root . '/' . $relative;
-		$real = realpath( $path );
+	private function file_list( array $item, string $root, bool $refresh ): array {
+		$key = 'wpephpcompat_files_' . md5( $item['type'] . '|' . $item['slug'] . '|' . $item['version'] . '|' . $root . '|' . Scanner_Bundle::ruleset() );
 
-		if ( false === $real || ( $real !== $root && 0 !== strpos( $real, $root . '/' ) ) || ! is_readable( $real ) ) {
-			return null;
+		if ( ! $refresh ) {
+			$cached = get_transient( $key );
+			if ( is_array( $cached ) && isset( $cached['files'], $cached['fingerprint'] ) ) {
+				return $cached;
+			}
 		}
 
-		$content = file_get_contents( $real ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file.
+		$list = Scanner::file_list( $root, Scanner::fingerprint_salt( $item ) );
+		set_transient( $key, $list, self::LIST_TTL );
 
-		return false === $content ? null : $content;
+		return $list;
 	}
 }

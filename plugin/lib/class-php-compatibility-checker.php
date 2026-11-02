@@ -378,11 +378,10 @@ class PHP_Compatibility_Checker {
 				<p>
 					<?php
 					printf(
-						/* translators: 1: PHPCompatibility URL, 2: list of PHP versions, 3: WordPress Playground URL. */
-						wp_kses_post( __( 'This tool checks your plugins and themes with <a target="_blank" href="%1$s">PHPCompatibility</a> against PHP %2$s. Each problem shows the file, line, and why it breaks on that PHP version. The check runs in your browser on <a target="_blank" href="%3$s">WordPress Playground</a>, so it doesn\'t slow down your site: code from WordPress.org is downloaded from there, and premium or custom code is read from this site. If something fails, check for an update first: a newer version may already be compatible.', 'php-compatibility-checker' ) ),
+						/* translators: 1: PHPCompatibility URL, 2: list of PHP versions. */
+						wp_kses_post( __( 'This tool checks your plugins and themes with <a target="_blank" href="%1$s">PHPCompatibility</a> against PHP %2$s. Each problem shows the file, line, and why it breaks on that PHP version. The check runs on this site a few files at a time, so it stays within your host\'s limits, and no code is sent anywhere else. A plugin or theme is only checked again when its files change. If something fails, check for an update first: a newer version may already be compatible.', 'php-compatibility-checker' ) ),
 						esc_url( 'https://github.com/PHPCompatibility/PHPCompatibilityWP' ),
-						esc_html( implode( ', ', Scanner_Bundle::PHP_VERSIONS ) ),
-						esc_url( 'https://wordpress.org/playground/' )
+						esc_html( implode( ', ', Scanner_Bundle::PHP_VERSIONS ) )
 					);
 					?>
 				</p>
@@ -407,7 +406,7 @@ class PHP_Compatibility_Checker {
 								<th scope="row"></th>
 								<td>
 									<div class="wpe-pcc-run-scan">
-										<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button-secondary" />
+										<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button button-primary" />
 										<div class="wpe-pcc-scan-information">
 											<span style="display:none; visibility:visible;" class="spinner wpe-pcc-spinner"></span>
 											<span class="wpe-progress-active wpe-pcc-progress" style="display:none;">
@@ -428,7 +427,6 @@ class PHP_Compatibility_Checker {
 					<h2><?php esc_html_e( 'Scan Results for PHP Compatibility', 'php-compatibility-checker' ); ?></h2>
 
 					<div id="wpe-pcc-download-report" class="wpe-pcc-download-report" style="display:none;">
-						<a id="downloadReport" class="button-primary" href="#"><span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download Report', 'php-compatibility-checker' ); ?></a>
 						<label class="screen-reader-text" for="wpe-pcc-export-format"><?php esc_html_e( 'Report format', 'php-compatibility-checker' ); ?></label>
 						<select id="wpe-pcc-export-format">
 							<option value="pdf" selected="selected"><?php esc_html_e( 'PDF', 'php-compatibility-checker' ); ?></option>
@@ -436,6 +434,7 @@ class PHP_Compatibility_Checker {
 							<option value="csv"><?php esc_html_e( 'CSV', 'php-compatibility-checker' ); ?></option>
 							<option value="json"><?php esc_html_e( 'JSON', 'php-compatibility-checker' ); ?></option>
 						</select>
+						<a id="downloadReport" class="button button-primary" href="#"><span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download Report', 'php-compatibility-checker' ); ?></a>
 						<a href="#" class="wpe-pcc-clear-results" id="cleanupButton"><?php esc_html_e( 'Clear results', 'php-compatibility-checker' ); ?></a>
 						<label class="wpe-pcc-developer-mode">
 							<input type="checkbox" id="developermode" name="developermode" value="yes" />
@@ -581,10 +580,13 @@ class PHP_Compatibility_Checker {
 						<# } ); #>
 					</p>
 					<# if ( data.has_errors ) { #>
-					<p><?php esc_html_e( 'Click on PHP Version to see errors and warnings', 'php-compatibility-checker' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Select a PHP version to see its problems.', 'php-compatibility-checker' ); ?></p>
 					<# } #>
 					<# if ( data.skipped_note ) { #>
 					<p class="description">{{ data.skipped_note }}</p>
+					<# } #>
+					<# if ( data.needs_note ) { #>
+					<p class="description wpe-pcc-needs-php">{{ data.needs_note }}</p>
 					<# } #>
 					<# if ( data.bundled_only ) { #>
 					<p class="description"><?php esc_html_e( 'All of the problems are in bundled libraries, which often check for PHP features before using them. Test before treating them as blockers.', 'php-compatibility-checker' ); ?></p>
@@ -622,7 +624,7 @@ class PHP_Compatibility_Checker {
 	/**
 	 * Whether WordPress.org hosts a theme, from the update_themes transient.
 	 *
-	 * @since 1.7.0
+	 * @since 2.0.0
 	 *
 	 * @param object|false $updates    update_themes transient.
 	 * @param string       $stylesheet Theme directory name.
@@ -642,7 +644,7 @@ class PHP_Compatibility_Checker {
 	/**
 	 * Attach each item's stored scan result, when there is one for its current version.
 	 *
-	 * @since 1.7.0
+	 * @since 2.0.0
 	 *
 	 * @param array[] $items Plugins or themes.
 	 * @param string  $type  "plugin" or "theme".
@@ -838,7 +840,8 @@ class PHP_Compatibility_Checker {
 	public function filter_plugin_links( $links ) {
 
 		$url = add_query_arg( 'page', WPEPHPCOMPAT_ADMIN_PAGE_SLUG, admin_url( 'tools.php' ) );
-		array_unshift( $links, '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Start Scan', 'php-compatibility-checker' ) . '</a>' );
+		// Names where the link goes (like core's "Settings"); it opens the page, it doesn't start a scan.
+		array_unshift( $links, '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Open checker', 'php-compatibility-checker' ) . '</a>' );
 
 		return $links;
 	}

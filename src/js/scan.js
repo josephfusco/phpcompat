@@ -1,6 +1,7 @@
 /* global checkerList */
 import '../scss/scan.scss';
 import jQuery from 'jquery';
+import { __ } from '@wordpress/i18n';
 import {
 	initQueue,
 	runNextJob,
@@ -52,6 +53,14 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 
 	runButton.on( 'click', function ( event ) {
 		event.preventDefault();
+
+		// "Scan again": start from a fresh list. In "choose" mode, pick again.
+		if ( window.phpcompat.finished ) {
+			init();
+			if ( 'choose' === mode() ) {
+				return;
+			}
+		}
 
 		// "Choose" mode scans only the ticked items (#67).
 		if ( 'choose' === mode() ) {
@@ -164,7 +173,11 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		initResults( checkerList, mode() );
 		activeOnlySwitch.prop( 'disabled', false );
 		$( '.wpe-pcc-select-actions' ).toggle( 'choose' === mode() );
-		runButton.prop( 'disabled', false );
+		window.phpcompat.finished = false;
+		runButton
+			.prop( 'disabled', false )
+			.addClass( 'button-primary' )
+			.val( __( 'Scan site', 'php-compatibility-checker' ) );
 		updateRunButton();
 	}
 

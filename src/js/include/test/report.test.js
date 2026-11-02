@@ -6,14 +6,22 @@ import { describe, it, expect, vi, beforeAll } from 'vitest';
 // jQuery is provided by WordPress at runtime; these functions don't use it.
 vi.mock( 'jquery', () => ( { default: () => ( {} ) } ) );
 
-const { compareVersions, isBundledLibrary } = await import( '../render' );
+const { compareVersions, isBundledLibrary, neededPhp, needsPhpNote } =
+	await import( '../render' );
+const { default: neededPhpCases } =
+	await import( '../../../../tests/fixtures/needed-php-cases.json' );
 const {
 	groupProblems,
 	groupByMessage,
-	buildReportHtml,
 	executiveSummary,
 	recommendation,
-} = await import( '../print-report' );
+	versionList,
+	libraryOf,
+	splitProblems,
+	splitFound,
+	glanceDetails,
+} = await import( '../report-model' );
+const { buildReportHtml } = await import( '../print-report' );
 const { csvCell, csvReport, reportMeta } = await import( '../download' );
 
 const problem = ( php, line, message, file = 'inc/legacy.php' ) => ( {
@@ -199,9 +207,9 @@ describe( 'PDF report (accessible HTML, saved via print)', () => {
 		expect( doc.match( /<caption[ >]/g ) ).toHaveLength( tables );
 		// Every header cell (not <thead>) declares what it labels.
 		const headers = doc.match( /<th[\s>]/g ).length;
-		expect( doc.match( /<th [^>]*scope="(col|row)"/g ) ).toHaveLength(
-			headers
-		);
+		expect(
+			doc.match( /<th [^>]*scope="(col|row|rowgroup)"/g )
+		).toHaveLength( headers );
 	} );
 
 	it( 'does not rely on color alone for status', () => {
@@ -274,5 +282,200 @@ describe( 'PDF download (PDFKit)', () => {
 			'L',
 			'LI',
 		].forEach( ( tag ) => expect( pdf ).toContain( `/S /${ tag }` ) );
+	} );
+} );
+
+describe( 'report model', () => {
+	const checked = [ '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5' ];
+
+	it( 'writes runs of versions as ranges', () => {
+		expect( versionList( checked, checked ) ).toBe( '7.4–8.5' );
+		expect( versionList( [ '8.3', '8.4', '8.5' ], checked ) ).toBe(
+			'8.3–8.5'
+		);
+		expect( versionList( [ '7.4', '8.3', '8.4', '8.5' ], checked ) ).toBe(
+			'7.4, 8.3–8.5'
+		);
+		expect( versionList( [ '7.4', '8.0' ], checked ) ).toBe( '7.4, 8.0' );
+		expect( versionList( [ '7.4', '8.1' ], checked ) ).toBe( '7.4, 8.1' );
+		expect( versionList( [], checked ) ).toBe( '' );
+	} );
+
+	it( 'finds the bundled library a file belongs to', () => {
+		expect(
+			libraryOf(
+				'core/lib/vendor/paragonie/constant_time_encoding/src/Base32.php'
+			)
+		).toEqual( {
+			name: 'paragonie/constant_time_encoding',
+			path: 'core/lib/vendor/paragonie/constant_time_encoding',
+			location: 'core/lib/vendor/',
+		} );
+		expect( libraryOf( 'node_modules/@scope/pkg/index.php' ) ).toEqual( {
+			name: '@scope/pkg',
+			path: 'node_modules/@scope/pkg',
+			location: '',
+		} );
+		expect( libraryOf( 'third-party/Parsedown/Parsedown.php' ) ).toEqual( {
+			name: 'Parsedown',
+			path: 'third-party/Parsedown',
+			location: '',
+		} );
+		expect( libraryOf( 'includes/legacy.php' ) ).toBeNull();
+	} );
+
+	it( 'summarizes bundled libraries and keeps own files in full', () => {
+		const item = {
+			php: { 7.4: 'fail', '8.0': 'fail' },
+			problems: [
+				problem( '7.4', 10, 'own problem', 'inc/own.php' ),
+				problem( '7.4', 1, 'lib error', 'vendor/acme/lib/a.php' ),
+				problem( '8.0', 1, 'lib error', 'vendor/acme/lib/a.php' ),
+				{
+					...problem(
+						'8.0',
+						2,
+						'lib warning',
+						'vendor/acme/lib/b.php'
+					),
+					type: 'WARNING',
+				},
+			],
+		};
+		const { files, libraries } = splitProblems( item );
+
+		expect( files.map( ( file ) => file.file ) ).toEqual( [
+			'inc/own.php',
+		] );
+		expect( libraries ).toEqual( [
+			{
+				name: 'acme/lib',
+				path: 'vendor/acme/lib',
+				location: '',
+				files: 2,
+				errors: 1,
+				warnings: 1,
+				versions: [ '7.4', '8.0' ],
+			},
+		] );
+	} );
+
+	it( 'merges messages that differ only in what was found', () => {
+		const msg = ( name ) =>
+			`Implicitly marking a parameter as nullable is deprecated since PHP 8.4. Update the type to be explicitly nullable instead. Found implicitly nullable parameter: ${ name }.`;
+		expect( splitFound( msg( '$link' ) ) ).toMatchObject( {
+			label: 'Found implicitly nullable parameter',
+			value: '$link',
+		} );
+
+		const [ file ] = groupProblems( [
+			problem( '8.4', 95, msg( '$link' ) ),
+			problem( '8.4', 95, msg( '$new_link' ) ),
+			problem( '8.4', 129, msg( '$link' ) ),
+			problem( '8.4', 200, 'Something else' ),
+		] );
+		const rows = groupByMessage( file.rows );
+
+		expect( rows ).toHaveLength( 2 );
+		expect( rows[ 0 ].message ).toMatch(
+			/Found implicitly nullable parameter: \$link, \$new_link\.$/
+		);
+		expect( rows[ 0 ].lines ).toEqual( [ 95, 129 ] );
+	} );
+
+	it( 'says whether a row fails or passes, with ranges', () => {
+		const meta = { max_php_checked: '8.5' };
+		const php = Object.fromEntries( checked.map( ( v ) => [ v, 'fail' ] ) );
+		expect(
+			glanceDetails( { status: 'problems', php, problems: [] }, meta )
+		).toBe( 'Fails on PHP 7.4–8.5' );
+		expect(
+			glanceDetails(
+				{
+					status: 'passes',
+					requires_php: '8.3',
+					php: {
+						8.2: 'not_counted',
+						8.3: 'pass',
+						8.4: 'pass',
+						8.5: 'pass',
+					},
+				},
+				meta
+			)
+		).toBe( 'Passes on PHP 8.3–8.5 (requires PHP 8.3)' );
+	} );
+
+	it( 'puts bundled libraries in a summary table in the printable report', () => {
+		const html = buildReportHtml(
+			[
+				{
+					...items[ 0 ],
+					problems: [
+						...items[ 0 ].problems,
+						problem( '7.2', 5, 'lib', 'vendor/acme/lib/x.php' ),
+					],
+				},
+			],
+			{
+				site: { url: 'https://example.com', name: 'Example' },
+				summary: { problems: 1, not_checked: 0, passes: 0, failed: 0 },
+				generated_at: '2026-11-02T00:00:00Z',
+				source: 'PHPCompatibilityWP 3.0.0',
+				max_php_checked: '7.4',
+				scope: 'yes',
+			}
+		);
+		expect( html ).toContain( 'Bundled libraries' );
+		expect( html ).toContain( 'acme/lib' );
+		expect( html ).not.toContain( '<code>vendor/acme/lib/x.php</code>' );
+		expect( html ).not.toContain( 'WordPress Playground (playground' );
+		expect( html ).toContain( 'Checked with' );
+	} );
+} );
+
+describe( 'needed PHP (shared cases with the PHP side)', () => {
+	const report = ( testCase ) => {
+		const versions = {};
+		Object.entries( testCase.errors ).forEach( ( [ version, errors ] ) => {
+			const path = testCase.bundled
+				? 'vendor/acme/lib/a.php'
+				: 'includes/a.php';
+			versions[ version ] = {
+				totals: { errors, warnings: 0 },
+				files: errors ? { [ path ]: { messages: [] } } : {},
+			};
+		} );
+		return { versions, platform_php: testCase.platform_php || '' };
+	};
+
+	it.each( neededPhpCases.cases )( '$name', ( testCase ) => {
+		expect(
+			neededPhp(
+				{ requires_php: testCase.requires_php },
+				report( testCase )
+			)
+		).toEqual( testCase.expected );
+	} );
+
+	it( 'explains the finding in one sentence', () => {
+		expect(
+			needsPhpNote( {
+				declared: '7.4',
+				needed: '8.0',
+				source: 'code',
+				bundled: false,
+			} )
+		).toBe(
+			'Its code needs PHP 8.0 or newer, but it says it requires PHP 7.4.'
+		);
+		expect(
+			needsPhpNote( {
+				declared: '',
+				needed: '8.1',
+				source: 'composer',
+				bundled: false,
+			} )
+		).toMatch( /from Composer.*doesn't say/ );
 	} );
 } );

@@ -12,9 +12,11 @@ namespace WPEngine_PHPCompat;
 /**
  * Keeps the latest scan result for each plugin and theme.
  *
- * Results come from the browser scanner (via the REST API) or from WP-CLI. A
+ * Results come from the scan page (via the REST API) or from WP-CLI. A
  * result belongs to one exact version and rule set, so a plugin update or a
- * newer PHPCompatibility simply misses the cache and gets scanned again.
+ * newer PHPCompatibility simply misses the cache and gets scanned again. It
+ * also keeps a fingerprint of the files scanned, so an unchanged item can be
+ * reused without scanning (see Scanner::file_list()).
  *
  * Each plugin or theme has one non-autoloaded option, overwritten by its
  * next scan. Nothing is shared between items, so the browser can save several
@@ -60,9 +62,11 @@ class Results {
 	 * @param array $item Item with type, slug, and version.
 	 * @return array|null {
 	 *     @type string $version    Version scanned.
-	 *     @type string $source     "wporg" (scanned from WordPress.org) or "local" (scanned from this site's files).
+	 *     @type string $source     "local" (scanned from this site's files) or, for results stored by
+	 *                              older versions, "wporg" (scanned from WordPress.org).
 	 *     @type string $ruleset    Rule set used.
 	 *     @type int    $scanned_at Unix time.
+	 *     @type string $fingerprint Fingerprint of the files scanned, or empty.
 	 *     @type array  $report     Report (see sanitize_report()).
 	 * }
 	 */
@@ -86,16 +90,19 @@ class Results {
 	 *
 	 * @param array  $item   Item with type, slug, and version.
 	 * @param array  $report Report from the scanner.
-	 * @param string $source "wporg" or "local".
+	 * @param string $source      "wporg" or "local".
+	 * @param string $fingerprint Fingerprint of the files scanned (Scanner::file_list()), so an
+	 *                            unchanged item can reuse this result; empty to always rescan.
 	 * @return array The stored result.
 	 */
-	public function save( array $item, array $report, string $source ): array {
+	public function save( array $item, array $report, string $source, string $fingerprint = '' ): array {
 		$stored = array(
-			'version'    => (string) $item['version'],
-			'source'     => 'wporg' === $source ? 'wporg' : 'local',
-			'ruleset'    => $this->ruleset,
-			'scanned_at' => time(),
-			'report'     => self::sanitize_report( $report ),
+			'version'     => (string) $item['version'],
+			'source'      => 'wporg' === $source ? 'wporg' : 'local',
+			'ruleset'     => $this->ruleset,
+			'scanned_at'  => time(),
+			'fingerprint' => $fingerprint,
+			'report'      => self::sanitize_report( $report ),
 		);
 
 		update_option( self::option_name( $item ), $stored, false );
@@ -210,10 +217,14 @@ class Results {
 			$clean[ $totals['errors'] ? 'incompatible' : 'compatible' ][] = $version;
 		}
 
-		// Files that weren't scanned (too big, or past the file limit), so a pass isn't overstated.
+		// Files that weren't scanned (too big, past the file limit, or stopped the scan), so a pass isn't overstated.
 		$skipped                = isset( $report['skipped'] ) && is_array( $report['skipped'] ) ? $report['skipped'] : array();
 		$clean['skipped']       = array_slice( array_values( array_filter( array_map( array( __CLASS__, 'sanitize_path' ), array_map( 'strval', $skipped ) ) ) ), 0, 100 );
 		$clean['skipped_count'] = isset( $report['skipped_count'] ) ? absint( $report['skipped_count'] ) : count( $clean['skipped'] );
+
+		// The PHP version the item's Composer dependencies require (see Scanner::composer_php()).
+		$platform              = isset( $report['platform_php'] ) ? (string) $report['platform_php'] : '';
+		$clean['platform_php'] = preg_match( '/^\d{1,2}\.\d{1,2}$/', $platform ) ? $platform : '';
 
 		uksort( $clean['versions'], 'version_compare' );
 		usort( $clean['compatible'], 'version_compare' );

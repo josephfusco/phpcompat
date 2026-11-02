@@ -115,7 +115,9 @@ export function setItemStatus( job, text, spinning = false ) {
 	const card = $( `#${ job.type }_${ job.slug }` );
 	card.find( '.wpe-pcc-status' ).text( text );
 	if ( spinning && ! card.find( '.spinner' ).length ) {
-		$( '<span class="spinner"></span>' ).show().appendTo( card );
+		$( '<span class="spinner"></span>' )
+			.show()
+			.insertAfter( card.find( '.wpe-pcc-status' ).first() );
 	}
 }
 
@@ -303,13 +305,13 @@ export function updateResult( report, job ) {
 			);
 	}
 
-	// Files that weren't checked (too big, or past the file limit).
+	// Files that weren't checked (too big, past the file limit, or stopped the scan).
 	if ( report.skipped_count ) {
 		view.skipped_note = sprintf(
 			/* translators: %d: number of files. */
 			_n(
-				'%d file was too large to check and was skipped.',
-				'%d files were too large or too many to check and were skipped.',
+				"%d file couldn't be checked and was skipped.",
+				"%d files couldn't be checked and were skipped.",
 				report.skipped_count,
 				'php-compatibility-checker'
 			),
@@ -317,9 +319,15 @@ export function updateResult( report, job ) {
 		);
 	}
 
+	const needs = neededPhp( job, report );
+	if ( needs ) {
+		view.needs_note = needsPhpNote( needs );
+	}
+
 	$( `#${ job.type }_${ job.slug }` ).replaceWith( renderCard( view ) );
 
 	recordResult( job, {
+		needs_php: needs,
 		status: hasProblems ? 'problems' : 'passes',
 		reason: '',
 		php: entryPhp,
@@ -451,4 +459,110 @@ export function finishResults() {
 			count( 'failed' )
 		)
 	);
+}
+
+/**
+ * The PHP version an item really needs, when that's newer than its
+ * "Requires PHP" header says (or the header is missing). Mirrors
+ * Scanner::needed_php(); both are tested against the same cases.
+ *
+ * @param {Object} job    Item with requires_php.
+ * @param {Object} report Report.
+ * @return {{declared: string, needed: string, source: string, bundled: boolean}|null} Finding, or null.
+ */
+export function neededPhp( job, report ) {
+	const versions = Object.keys( report.versions || {} ).sort(
+		compareVersions
+	);
+	if ( ! versions.length ) {
+		return null;
+	}
+
+	// Oldest version from which everything newer passes too.
+	let from = '';
+	let bundled = true;
+	for ( const version of [ ...versions ].reverse() ) {
+		const data = report.versions[ version ];
+		if ( data?.totals?.errors ) {
+			bundled = Object.keys( data.files || {} ).every( isBundledLibrary );
+			break;
+		}
+		from = version;
+	}
+	const code = from && from !== versions[ 0 ] ? from : '';
+	const composer = report.platform_php || '';
+	const declared = job.requires_php || '';
+	const floor = declared || versions[ 0 ];
+
+	const candidates = [
+		[ 'code', code ],
+		[ 'composer', composer ],
+	].filter(
+		( [ , version ] ) => version && compareVersions( version, floor ) > 0
+	);
+	if ( ! candidates.length ) {
+		return null;
+	}
+	candidates.sort( ( a, b ) => compareVersions( a[ 1 ], b[ 1 ] ) );
+	const [ source, needed ] = candidates[ candidates.length - 1 ];
+
+	return {
+		declared,
+		needed,
+		source,
+		bundled: 'code' === source && bundled,
+	};
+}
+
+/**
+ * One sentence about a wrong or missing "Requires PHP".
+ *
+ * @param {Object} needs Finding from neededPhp().
+ * @return {string} Note.
+ */
+export function needsPhpNote( needs ) {
+	if ( 'composer' === needs.source ) {
+		return needs.declared
+			? sprintf(
+					/* translators: 1: PHP version its libraries need, 2: PHP version it says it needs. */
+					__(
+						'Its bundled libraries require PHP %1$s (from Composer), but it says it requires PHP %2$s.',
+						'php-compatibility-checker'
+					),
+					needs.needed,
+					needs.declared
+				)
+			: sprintf(
+					/* translators: %s: PHP version its libraries need. */
+					__(
+						"Its bundled libraries require PHP %s (from Composer), but it doesn't say which PHP it requires.",
+						'php-compatibility-checker'
+					),
+					needs.needed
+				);
+	}
+	const note = needs.declared
+		? sprintf(
+				/* translators: 1: PHP version its code needs, 2: PHP version it says it needs. */
+				__(
+					'Its code needs PHP %1$s or newer, but it says it requires PHP %2$s.',
+					'php-compatibility-checker'
+				),
+				needs.needed,
+				needs.declared
+			)
+		: sprintf(
+				/* translators: %s: PHP version its code needs. */
+				__(
+					"Its code needs PHP %s or newer, but it doesn't say which PHP it requires.",
+					'php-compatibility-checker'
+				),
+				needs.needed
+			);
+	return needs.bundled
+		? `${ note } ${ __(
+				'The code that needs it is in bundled libraries, which may only load on newer PHP.',
+				'php-compatibility-checker'
+			) }`
+		: note;
 }

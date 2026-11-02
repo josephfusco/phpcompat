@@ -1,0 +1,57 @@
+{
+	"_comment": "Shared by tests/BatchingTest.php (Scanner::needed_php) and src/js/include/test/report.test.js (neededPhp), so both agree.",
+	"cases": [
+		{
+			"name": "header is right: passes everywhere",
+			"requires_php": "7.4",
+			"errors": { "7.4": 0, "8.0": 0, "8.5": 0 },
+			"expected": null
+		},
+		{
+			"name": "code needs 8.0 but header says 7.4",
+			"requires_php": "7.4",
+			"errors": { "7.4": 2, "8.0": 0, "8.5": 0 },
+			"expected": { "declared": "7.4", "needed": "8.0", "source": "code", "bundled": false }
+		},
+		{
+			"name": "only bundled libraries need it",
+			"requires_php": "7.4",
+			"errors": { "7.4": 1, "8.0": 0, "8.5": 0 },
+			"bundled": true,
+			"expected": { "declared": "7.4", "needed": "8.0", "source": "code", "bundled": true }
+		},
+		{
+			"name": "no header, code needs 8.0",
+			"requires_php": "",
+			"errors": { "7.4": 1, "8.0": 0, "8.5": 0 },
+			"expected": { "declared": "", "needed": "8.0", "source": "code", "bundled": false }
+		},
+		{
+			"name": "fails on the newest version: no minimum to report",
+			"requires_php": "7.4",
+			"errors": { "7.4": 1, "8.0": 0, "8.5": 3 },
+			"expected": null
+		},
+		{
+			"name": "Composer requires 8.1 but header says 7.4",
+			"requires_php": "7.4",
+			"errors": { "7.4": 0, "8.0": 0, "8.5": 0 },
+			"platform_php": "8.1",
+			"expected": { "declared": "7.4", "needed": "8.1", "source": "composer", "bundled": false }
+		},
+		{
+			"name": "Composer requirement at or below the header is fine",
+			"requires_php": "8.1",
+			"errors": { "7.4": 1, "8.0": 1, "8.1": 0, "8.5": 0 },
+			"platform_php": "8.1",
+			"expected": null
+		},
+		{
+			"name": "the higher of code and Composer wins",
+			"requires_php": "7.4",
+			"errors": { "7.4": 1, "8.0": 0, "8.1": 0, "8.5": 0 },
+			"platform_php": "8.1",
+			"expected": { "declared": "7.4", "needed": "8.1", "source": "composer", "bundled": false }
+		}
+	]
+}

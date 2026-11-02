@@ -1,12 +1,12 @@
 # PHP Compatibility Checker: what's changed since end of support
 
-**Status:** proposal for discussion · **Date:** November 2026 · **Branch:** `feature/wasm-scanner`
+**Status:** proposal for discussion · **Date:** November 2026 · **Branch:** `fix/scanner-fallback`
 
 ## Summary
 
 In July 2026 WP Engine ended support for PHP Compatibility Checker and archived the repository. Given how the plugin worked then, that was the right call: every result came from WP Tide, an outside service that is no longer maintained, whose results stop at PHP 8.0, and that we couldn't fix or replace from inside the plugin.
 
-That blocker is now gone. The plugin no longer uses Tide. It runs the standard PHP compatibility checker itself, in the admin's browser, for PHP 7.4 through 8.5, for every plugin and theme, including premium and custom code. WP Engine doesn't need to run any service. At the same time, PHP has had its most serious security event in years, so people need this tool more than they did in July.
+That blocker is now gone. The plugin no longer uses Tide. It runs the standard PHP compatibility checker itself, on the site, for PHP 7.4 through 8.5, for every plugin and theme, including premium and custom code. WP Engine doesn't need to run any service. At the same time, PHP has had its most serious security event in years, so people need this tool more than they did in July.
 
 This document records the original decision, what has changed since, and what maintaining the plugin would actually cost, so the decision can be revisited on its merits.
 
@@ -29,22 +29,23 @@ The notice doesn't state reasons. These were the conditions on record at the tim
 
 ### 1. Tide is gone
 
-The plugin now ships its own scanner and runs it in the admin's browser:
+The plugin now ships its own scanner and runs it on the site, in short batches:
 
-- **The checker:** [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility) on [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), with the WordPress ruleset [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP). These are the tools the PHP and WordPress communities already use; WordPress VIP's PHP-upgrade guidance, for example, is built on them. The versions are pinned in `tools/phpcs-bundle/composer.lock`, shipped as a 1.2 MB zip, and printed in every report.
-- **Where it runs:** PHP runs in the browser on [WordPress Playground](https://wordpress.org/playground/), loaded from playground.wordpress.net (WordPress.org's own infrastructure). The plugin ships no WebAssembly. The site's server never runs a scan, so shared hosts with limited CPU and disk I/O are unaffected. Avoiding exactly that load is why the plugin moved to Tide in the first place.
-- **Where the code comes from:** code from WordPress.org is downloaded by the browser from downloads.wordpress.org, which allows this directly. Premium, custom, and modified code is read from the site in small batches, by administrators who are already allowed to see that code.
+- **The checker:** [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility) on [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), with the WordPress ruleset [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP). These are the tools the PHP and WordPress communities already use; WordPress VIP's PHP-upgrade guidance, for example, is built on them. The versions are pinned in `tools/phpcs-bundle/composer.lock`, shipped as plain PHP files (about 4.7 MB; WordPress.org doesn't accept archives in plugins), checked against their build checksum, and printed in every report.
+- **Where it runs:** on the site's own PHP, in-process (no `exec()`), driven by the scan page as a resumable batch job: one short request at a time, each sized to take about 3 seconds, with retries and backoff when the host is busy, and any file that hits a memory or time limit skipped and listed. Nothing is sent to another service.
+- **Why not the browser:** an earlier version ran PHP in the browser on WordPress Playground. Playground's CDN answered the hidden iframe with a bot challenge that the iframe can't complete, so scans failed on real admin browsers. Depending on a third-party site we can't control is the same kind of risk that ended Tide, so scanning moved onto the site. It's designed for shared hosting (see the README's "Built for shared hosting").
+- **Reuse:** results are stored with a fingerprint of each item's PHP files, so a later scan only checks what changed (a site with nine plugins and themes rescans in about 2 seconds).
 - **WP-CLI:** runs the same scanner directly on the server, with no browser and no `exec()`.
 
 | | With Tide (1.6.x) | Now |
 |---|---|---|
 | PHP versions | 5.6 to 8.0 | 7.4 to 8.5 (WordPress 7.0 requires 7.4) |
 | Premium and custom code | Not checked | Checked |
-| Depends on | An unmaintained outside service | Pinned open-source tools in the plugin; Playground and downloads.wordpress.org from WordPress.org |
+| Depends on | An unmaintained outside service | Nothing outside the site: pinned open-source tools in the plugin |
 | Service for WP Engine to run | None (Tide was free) | None |
 | Wrong results from Tide's own bugs | Possible: unknown versions were scanned as the latest release; custom plugins sharing a WordPress.org name got that plugin's results; large plugins could silently lose a PHP version | Not reproduced: exact versions only, and every version accounted for |
 
-On a test site with nine plugins and themes, a first scan takes about a minute and later scans take about 4 seconds, because results for unchanged WordPress.org code are reused. Three items that Tide reported as "not checked" are now checked. One plugin that Tide passed has a real PHP 7.4 failure (Yoast SEO 28.8 calls `get_debug_type()` without the polyfill it needs).
+On a test site with nine plugins and themes, a first scan takes under a minute (Broken Link Checker's 569 files take about 11 seconds, in requests of at most 4 seconds), and later scans about 2 seconds, because unchanged items are reused. Three items that Tide reported as "not checked" are now checked. One plugin that Tide passed has a real PHP 7.4 failure (Yoast SEO 28.8 calls `get_debug_type()` without the polyfill it needs).
 
 ### 2. PHP's security picture changed
 
@@ -62,6 +63,26 @@ A survey of current tools (November 2026) found no free, maintained equivalent:
 
 At around 200,000 installs, this is WP Engine's third-largest plugin on WordPress.org after ACF and Better Search Replace.
 
+### 4. It fits WP Engine's own PHP upgrade flow
+
+The July decision noted that WP Engine no longer recommends the plugin, because the platform has its own way to prepare for PHP upgrades: Preview PHP (and Test Driver) in the User Portal. That platform feature and this plugin do different jobs, and neither can replace the other:
+
+| | PHP Compatibility Checker | Preview PHP / Test Driver |
+|---|---|---|
+| Who can use it | Any WordPress site, any host | WP Engine customers |
+| How it checks | Reads the code (static analysis) against every PHP version at once | Runs the real site on one newer PHP version, for your browser only |
+| Catches | Problems in code paths you may never click, with file and line | Runtime problems in the pages you actually visit |
+| Best for | Deciding, and finding what to fix | Confirming just before switching |
+
+A plugin can't take over Preview PHP: the server picks the PHP version before WordPress loads, so switching it per browser has to happen on the platform. A scanner is the opposite: it belongs with the site's code, not the platform. Together they make one flow: **check, then preview, then switch.**
+
+- **On the site:** on WP Engine, the plugin's sidebar already links straight to the environment's page with the Preview PHP button, and it only shows on WP Engine.
+- **In the User Portal (proposed):** the portal can show the plugin's results next to Preview PHP ("3 plugins have problems on PHP 8.4") by reading `wp php-compat scan --cached --format=json` or the Abilities API. Both exist today, return the same results as the scan page, and need no `exec()`. WP Engine gets the "check" step without building or running a scanner.
+- **In Support:** PHP upgrade campaigns or tickets that need a compatibility answer can use the same WP-CLI command instead of separate scripts or third-party scans.
+- **On the web:** instead of removing the Solution Center page and the PHP 7 blog post, point them (and one line in the PHP guide: "check your plugins first, then use Preview PHP") to a single current page.
+
+That turns "WP Engine no longer recommends it" into "it's the first step of WP Engine's PHP upgrade process", for WP Engine customers and for every site that isn't on WP Engine.
+
 ## What maintaining it would take
 
 The parts WP Engine would own are small: the plugin itself, one runner file (`tools/phpcs-bundle/runner.php`), and a pinned list of dependencies. There's no service to run.
@@ -71,30 +92,25 @@ The parts WP Engine would own are small: the plugin itself, one runner file (`to
 | Review scanner updates (PHPCompatibility, PHP_CodeSniffer) | When upstream releases | Read the changelog, merge | Dependabot opens the PR; CI runs real scans (`tests/RunnerTest.php`). Stored results are rescanned automatically when the rule set changes. These PRs are never auto-merged. |
 | Add a new PHP version | Once a year (8.6 in November 2026) | One constant, test fixtures, readme | None needed |
 | Add a critical PHP advisory | Rare (PHP2Shell is the first) | One entry in `Php_Releases::advisories()` plus a test | Sites can also add advisories with a filter |
-| Update the Playground client | When it changes | Merge, run one real scan | Dependabot; the e2e tests stub the runtime, so do one manual check |
 | "Tested up to" for new WordPress releases | Each WordPress release | Merge | Workflow opens the PR |
 | Development dependencies | Weekly | None | Auto-merged when CI passes |
 | Issues and support forum | Ongoing | Triage | None |
 
 *Estimate:* a few hours a month, plus a day or two around each PHP release. Most dependency churn is already automated, and the work that remains is the kind that keeps results correct.
 
-CI covers PHP lint (WordPress Coding Standards, PHPCompatibility 7.4+), 48 PHP unit tests (including real scans), 22 JavaScript unit tests, and 19 end-to-end tests across the scan page, reports, WP-CLI, and the Abilities API.
+CI covers PHP lint (WordPress Coding Standards, PHPCompatibility 7.4+), 78 PHP unit tests (including real scans, non-UTF-8 files, historical false positives, and Site Health), 55 JavaScript unit tests (including retries, backoff, and failure handling of the batch scanner), and 22 end-to-end tests across the scan page, reports, Site Health, permissions, WP-CLI, and the Abilities API.
 
 ## Risks and open questions
 
-1. **Shipping updates (the main decision needed).** Since 1.6.4, installed sites get updates from `wpe-plugin-updates.wpengine.com` (`Update URI: false`), not from WordPress.org, and WordPress.org shows 1.6.3 with "no longer maintained". A new release needs one of two things:
-   - WP Engine publishes it through its own update server, as before. This needs an owner on WP Engine's side.
-   - The plugin goes back to updating from WordPress.org. This needs Plugins team coordination and someone with commit access.
+1. **Shipping updates.** Releases go to WordPress.org directly, like any hosted plugin; the custom updater and `Update URI: false` (added in 1.6.4) are removed. One catch: sites already on 1.6.4 don't check WordPress.org for this plugin, and their updater only asks `wpe-plugin-updates.wpengine.com`. That server needs one entry for the new release (pointing at the WordPress.org zip) so those sites move over; after that, everything updates from WordPress.org.
 2. **PHPCompatibility 10 is in alpha.** It's the only release line with PHP 8.1–8.5 checks, and some 8.3–8.5 changes are still being added upstream. The plugin says which version produced each result, and moving to the stable release when it ships is a routine Dependabot update.
-3. **Depending on WordPress.org's Playground and downloads.** These are actively maintained, but if a firewall or browser extension blocks them, the scan page can't scan. There's a subtler case too: Playground's CDN sometimes answers with a bot challenge (seen during testing, after many automated scans from one network), and a hidden iframe can't complete it. The scan page then stops after 45 seconds and says what to do. WP-CLI is unaffected, and the `wpephpcompat_playground_remote_url` filter allows a self-hosted Playground. Before release:
-   - The Playground and WordPress.org systems teams should confirm that embedding `remote.html` from a plugin with around 200,000 installs is supported, and how their bot protection treats embedded loads.
-   - The WordPress.org Plugins team should confirm that loading playground.wordpress.net in an iframe is within the plugin guidelines.
-4. **Ownership.** Someone needs to review and merge, and to be listed in `CODEOWNERS`. Day-to-day upkeep is mostly automated (see above).
+3. **Scanning uses the site's PHP.** A first scan of a large site keeps one PHP worker busy for a few minutes. Requests are short and one at a time, so hosts' limits aren't hit, but it is real work on the server. WP-CLI runs the same scanner without request limits, and the `wpephpcompat_pre_scan_report` filter lets a host supply results it already has.
+4. **Ownership.** Joe Fusco and the headless-oss team, who also maintain Faust.js and WPGraphQL Content Blocks. Day-to-day upkeep is mostly automated (see above).
 5. **PHPCompatibility is static analysis.** It can't see code that never runs, or problems that only appear at runtime. That was true with Tide as well. The plugin says so, and marks problems found only in bundled libraries.
 
 ## Options
 
-1. **Lift end of support under WP Engine.** Unarchive, ship this branch as 1.7.0 through the existing update channel, and name an owner. This keeps the plugin, its install base, and its reviews under WP Engine's name. *Recommended.*
+1. **Lift end of support under WP Engine.** Unarchive, ship this branch as 2.0.0 on WordPress.org (with one bridge entry on WP Engine's update server for sites on 1.6.4), maintained by Joe Fusco and the headless-oss team, and add the plugin as the "check" step of WP Engine's PHP upgrade flow. This keeps the plugin, its install base, and its reviews under WP Engine's name. *Recommended.*
 2. **Transfer it to the WordPress community.** Move the plugin to a WordPress.org or community home with WP Engine credited. This is a good longer-term path, and it's easier now that the plugin doesn't depend on any service.
 3. **Keep it archived.** The July decision stands. This work stays available as a public fork, and the WordPress.org listing keeps saying "no longer maintained".
 
@@ -106,7 +122,8 @@ If the answer is still no, nothing here needs to change upstream.
 
 ## Evidence
 
-- Branch: [`feature/wasm-scanner`](https://github.com/josephfusco/phpcompat/tree/feature/wasm-scanner) on the maintained fork.
+- Branch: [`fix/scanner-fallback`](https://github.com/josephfusco/phpcompat/tree/fix/scanner-fallback) on the maintained fork.
 - How it works, limitations, and a code map: [README](../README.md).
 - What the plugin relied on from Tide, and how it's replaced: the Tide request in `plugin/lib/class-scanner.php` and `src/js/include/queue-manager.js` (1.6.x) is replaced by `src/js/include/scanner.js`, `tools/phpcs-bundle/runner.php`, `plugin/lib/class-results.php`, and `plugin/lib/class-rest-controller.php`.
+- Site Health test and the "needs a newer PHP than it says" check: `plugin/lib/class-site-health.php` and `Scanner::needed_php()`.
 - Server PHP status and advisories: `plugin/lib/class-php-releases.php`.

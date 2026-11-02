@@ -3,12 +3,11 @@
  * Plugin Name:       PHP Compatibility Checker
  * Plugin URI:        https://wpengine.com
  * Description:       The WP Engine PHP Compatibility Checker can be used by any WordPress website on any web host to check PHP version compatibility.
- * Version:           1.6.4
+ * Version:           2.0.0
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            WP Engine
  * Author URI:        https://wpengine.com/
- * Update URI:        false
  * License:           GPLv2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       php-compatibility-checker
@@ -20,7 +19,7 @@ namespace WPEngine_PHPCompat;
 
 define( 'WPEPHPCOMPAT_ADMIN_PAGE_SLUG', 'wpe-php-compat' );
 define( 'WPEPHPCOMPAT_CAPABILITY', 'manage_options' );
-define( 'WPEPHPCOMPAT_VERSION', '1.6.4' );
+define( 'WPEPHPCOMPAT_VERSION', '2.0.0' );
 define( 'WPEPHPCOMPAT_PLUGIN_FILE', __FILE__ );
 define( 'WPEPHPCOMPAT_PLUGIN_DIR', __DIR__ . '/' );
 
@@ -38,7 +37,7 @@ function wpe_phpcompat_loader() {
 	// Add plugin action link.
 	add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), array( $register_phpcompat, 'filter_plugin_links' ) );
 
-	// REST API for the browser scanner: stores results, serves custom code to scan.
+	// REST API for the scan page: scans files in batches and stores results.
 	add_action(
 		'rest_api_init',
 		static function () {
@@ -48,6 +47,9 @@ function wpe_phpcompat_loader() {
 
 	// Abilities API (WordPress 6.9+): lets AI agents and other clients run scans.
 	Abilities::init();
+
+	// Site Health: a test for active plugins and the theme, and an Info section.
+	Site_Health::init();
 
 	// WP-CLI: wp php-compat scan|report|php-status.
 	if ( defined( 'WP_CLI' ) && WP_CLI ) {
@@ -126,25 +128,22 @@ function cleanup_legacy_data() {
 
 	wp_clear_scheduled_hook( 'wpephpcompat_start_test_cron' );
 
-	$paged = 1;
-
+	// Always the first page: each pass deletes what it found, so paging on
+	// would skip every other batch.
 	do {
 		$jobs = get_posts(
 			array(
 				'posts_per_page' => 100,
-				'paged'          => $paged,
 				'post_type'      => 'wpephpcompat_jobs',
+				'post_status'    => 'any',
 				'fields'         => 'ids',
 			)
 		);
 
 		foreach ( $jobs as $job ) {
-			wp_delete_post( $job );
+			wp_delete_post( $job, true );
 		}
-
-		$found_jobs = count( $jobs );
-		++$paged;
-	} while ( $found_jobs );
+	} while ( $jobs );
 
 	update_option( 'wpephpcompat_legacy_cleaned', 1 );
 }
@@ -167,6 +166,7 @@ function uninstall() {
 	cleanup_legacy_data();
 	delete_option( 'wpephpcompat_legacy_cleaned' );
 	Results::delete_all();
+	Rest_Controller::delete_transients();
 }
 
 /**
@@ -203,19 +203,3 @@ function upgrade( $upgrader, $hook_extra ) {
 register_activation_hook( __FILE__, __NAMESPACE__ . '\activate' );
 register_uninstall_hook( __FILE__, __NAMESPACE__ . '\uninstall' );
 add_action( 'upgrader_process_complete', __NAMESPACE__ . '\upgrade', 10, 2 );
-
-/**
- * Registers the plugin updater.
- *
- * @return void
- */
-function check_for_upgrades() {
-	$properties = array(
-		'plugin_slug'     => 'php-compatibility-checker',
-		'plugin_basename' => plugin_basename( __FILE__ ),
-	);
-
-	require_once __DIR__ . '/lib/class-plugin-updater.php';
-	new \WPEngine_PHPCompat\PluginUpdater( $properties );
-}
-add_action( 'admin_init', __NAMESPACE__ . '\check_for_upgrades' );
