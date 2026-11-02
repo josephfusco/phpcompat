@@ -188,13 +188,9 @@ describe( 'PDF report (accessible HTML, saved via print)', () => {
 
 	it( 'has one h1 and headings for every section', () => {
 		expect( html().match( /<h1[ >]/g ) ).toHaveLength( 1 );
-		[
-			'At a glance',
-			'Needs attention',
-			'Not checked (1)',
-			'Passes (1)',
-			'About this report',
-		].forEach( ( heading ) => expect( html() ).toContain( heading ) );
+		[ 'At a glance', 'Needs attention', 'About this report' ].forEach(
+			( heading ) => expect( html() ).toContain( heading )
+		);
 	} );
 
 	it( 'gives every table a caption and scoped headers', () => {

@@ -231,17 +231,6 @@ export function executiveSummary( items, meta ) {
 				'Scan again to check the items that failed to scan.',
 				'php-compatibility-checker'
 			),
-		meta.summary.not_checked &&
-			sprintf(
-				/* translators: %d: number of plugins and themes. */
-				_n(
-					'%d item could not be checked here; see "Not checked" for why.',
-					'%d items could not be checked here; see "Not checked" for why.',
-					meta.summary.not_checked,
-					'php-compatibility-checker'
-				),
-				meta.summary.not_checked
-			),
 	].filter( Boolean );
 
 	return { verdict, steps };
@@ -328,7 +317,7 @@ export function buildReportHtml( items, meta ) {
 			);
 		}
 		return __(
-			'Not on WordPress.org (premium, custom, or modified), so it cannot be checked.',
+			'Not on WordPress.org (premium, custom, or modified).',
 			'php-compatibility-checker'
 		);
 	};
@@ -337,12 +326,12 @@ export function buildReportHtml( items, meta ) {
 		if ( 'problems' === item.status ) {
 			const fails = sprintf(
 				/* translators: %s: PHP versions. */
-				__( 'Fails on %s', 'php-compatibility-checker' ),
+				__( 'On PHP %s', 'php-compatibility-checker' ),
 				versionsWith( item, 'fail' ).join( ', ' )
 			);
 			return item.update_version
 				? sprintf(
-						/* translators: 1: "Fails on 7.4, 8.0", 2: version number. */
+						/* translators: 1: "On PHP 7.4, 8.0", 2: version number. */
 						__(
 							'%1$s; update to %2$s available',
 							'php-compatibility-checker'
@@ -355,7 +344,7 @@ export function buildReportHtml( items, meta ) {
 		if ( 'passes' === item.status ) {
 			return sprintf(
 				/* translators: %s: PHP versions. */
-				__( 'Passes on %s', 'php-compatibility-checker' ),
+				__( 'On PHP %s', 'php-compatibility-checker' ),
 				versionsWith( item, 'pass' ).join( ', ' )
 			);
 		}
@@ -370,8 +359,6 @@ export function buildReportHtml( items, meta ) {
 
 	const { verdict, steps } = executiveSummary( items, meta );
 	const problemItems = byStatus( 'problems' );
-	const unchecked = [ ...byStatus( 'failed' ), ...byStatus( 'not_checked' ) ];
-	const passing = byStatus( 'passes' );
 
 	const facts = [
 		[
@@ -440,9 +427,15 @@ export function buildReportHtml( items, meta ) {
 					),
 			].filter( Boolean );
 
+			const fails = versionsWith( item, 'fail' ).join( ', ' );
 			const files = groupProblems( item.problems )
 				.map( ( file, fileIndex ) => {
 					const captionId = `item-${ index }-file-${ fileIndex }`;
+					const rows = groupByMessage( file.rows );
+					// Only show versions per row when they differ from the item's.
+					const showPhp = rows.some(
+						( row ) => row.versions.join( ', ' ) !== fails
+					);
 					return `
 				<table aria-describedby="${ captionId }">
 					<caption id="${ captionId }"><code>${ esc( file.file ) }</code>${
@@ -459,9 +452,9 @@ export function buildReportHtml( items, meta ) {
 						<th scope="col" class="type">${ esc( __( 'Type', 'php-compatibility-checker' ) ) }</th>
 						<th scope="col">${ esc( __( 'Problem', 'php-compatibility-checker' ) ) }</th>
 						<th scope="col" class="lines">${ esc( __( 'Lines', 'php-compatibility-checker' ) ) }</th>
-						<th scope="col" class="php">${ esc( __( 'PHP', 'php-compatibility-checker' ) ) }</th>
+						${ showPhp ? `<th scope="col" class="php">${ esc( __( 'PHP', 'php-compatibility-checker' ) ) }</th>` : '' }
 					</tr></thead>
-					<tbody>${ groupByMessage( file.rows )
+					<tbody>${ rows
 						.map(
 							( row ) => `<tr>
 						<td class="type ${ 'WARNING' === row.type ? 'warning' : 'error' }">${ esc(
@@ -471,7 +464,7 @@ export function buildReportHtml( items, meta ) {
 						) }</td>
 						<td>${ esc( row.message ) }</td>
 						<td class="lines">${ esc( row.lines.join( ', ' ) ) }</td>
-						<td class="php">${ esc( row.versions.join( ', ' ) ) }</td>
+						${ showPhp ? `<td class="php">${ esc( row.versions.join( ', ' ) ) }</td>` : '' }
 					</tr>`
 						)
 						.join( '' ) }</tbody>
@@ -503,27 +496,6 @@ export function buildReportHtml( items, meta ) {
 		} )
 		.join( '' );
 
-	const simpleTable = ( list, caption, lastHeading, cell ) => `
-		<table>
-			<caption class="screen-reader-text">${ esc( caption ) }</caption>
-			<thead><tr>
-				<th scope="col">${ esc( __( 'Name', 'php-compatibility-checker' ) ) }</th>
-				<th scope="col">${ esc( __( 'Version', 'php-compatibility-checker' ) ) }</th>
-				<th scope="col">${ esc( __( 'Type', 'php-compatibility-checker' ) ) }</th>
-				<th scope="col">${ esc( lastHeading ) }</th>
-			</tr></thead>
-			<tbody>${ list
-				.map(
-					( item ) => `<tr>
-				<th scope="row">${ esc( item.name ) }${ inactive( item ) }</th>
-				<td>${ esc( item.version ) }</td>
-				<td>${ esc( typeLabel( item ) ) }</td>
-				<td>${ esc( cell( item ) ) }</td>
-			</tr>`
-				)
-				.join( '' ) }</tbody>
-		</table>`;
-
 	const title = sprintf(
 		/* translators: %s: site name or URL. */
 		__( 'PHP Compatibility Report: %s', 'php-compatibility-checker' ),
@@ -547,7 +519,7 @@ export function buildReportHtml( items, meta ) {
 			sprintf(
 				/* translators: %s: plugin version number. */
 				__(
-					'Generated by PHP Compatibility Checker %s',
+					'Generated by PHP Compatibility Checker %s by WP Engine',
 					'php-compatibility-checker'
 				),
 				site.plugin_version || ''
@@ -562,7 +534,6 @@ export function buildReportHtml( items, meta ) {
 	a { color: #2145e6; }
 	.screen-reader-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	header.masthead { margin: 0 0 16pt; padding: 18pt 20pt; background: #1e1e1e; color: #fff; border-bottom: 3pt solid #3858e9; }
-	.eyebrow { margin: 0 0 4pt; color: #c7d0ff; font-size: 8pt; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 	h1 { margin: 0; font-size: 22pt; line-height: 1.2; }
 	.site-name { margin: 4pt 0 0; color: #dcdcde; }
 	h2 { margin: 20pt 0 8pt; padding-bottom: 4pt; border-bottom: 1px solid #c3c4c7; font-size: 14pt; break-after: avoid; }
@@ -604,11 +575,11 @@ export function buildReportHtml( items, meta ) {
 	.tag { margin-left: 4pt; padding: 0 5pt; border: 1px solid #c3c4c7; border-radius: 8pt; color: #50575e; font: 7.5pt sans-serif; white-space: nowrap; }
 	section.item { margin: 0 0 16pt; }
 	section.about { break-inside: avoid; }
+	.credit { margin-top: 14pt; font-size: 9pt; }
 </style>
 </head>
 <body>
 <header class="masthead">
-	<p class="eyebrow">${ esc( __( 'PHP Compatibility Checker', 'php-compatibility-checker' ) ) }</p>
 	<h1>${ esc( __( 'PHP Compatibility Report', 'php-compatibility-checker' ) ) }</h1>
 	<p class="site-name">${ esc( site.name || site.url ) }</p>
 </header>
@@ -648,7 +619,7 @@ export function buildReportHtml( items, meta ) {
 				<th scope="col">${ esc( __( 'Type', 'php-compatibility-checker' ) ) }</th>
 				<th scope="col">${ esc( __( 'Version', 'php-compatibility-checker' ) ) }</th>
 				<th scope="col">${ esc( __( 'Status', 'php-compatibility-checker' ) ) }</th>
-				<th scope="col">${ esc( __( 'PHP results', 'php-compatibility-checker' ) ) }</th>
+				<th scope="col">${ esc( __( 'Details', 'php-compatibility-checker' ) ) }</th>
 			</tr></thead>
 			<tbody>${ sorted
 				.map(
@@ -671,52 +642,6 @@ export function buildReportHtml( items, meta ) {
 			`<p>${ esc( __( 'No problems found.', 'php-compatibility-checker' ) ) }</p>`
 		}
 	</section>
-
-	${
-		unchecked.length
-			? `<section aria-labelledby="unchecked-heading">
-		<h2 id="unchecked-heading">${ esc(
-			sprintf(
-				/* translators: %d: number of plugins and themes. */
-				__( 'Not checked (%d)', 'php-compatibility-checker' ),
-				unchecked.length
-			)
-		) }</h2>
-		${ simpleTable(
-			unchecked,
-			__(
-				'Plugins and themes that were not checked, and why',
-				'php-compatibility-checker'
-			),
-			__( 'Reason', 'php-compatibility-checker' ),
-			reasonFor
-		) }
-	</section>`
-			: ''
-	}
-
-	${
-		passing.length
-			? `<section aria-labelledby="passes-heading">
-		<h2 id="passes-heading">${ esc(
-			sprintf(
-				/* translators: %d: number of plugins and themes. */
-				__( 'Passes (%d)', 'php-compatibility-checker' ),
-				passing.length
-			)
-		) }</h2>
-		${ simpleTable(
-			passing,
-			__(
-				'Plugins and themes with no problems',
-				'php-compatibility-checker'
-			),
-			__( 'Passes on PHP', 'php-compatibility-checker' ),
-			( item ) => versionsWith( item, 'pass' ).join( ', ' )
-		) }
-	</section>`
-			: ''
-	}
 
 	<section class="about" aria-labelledby="about-heading">
 		<h2 id="about-heading">${ esc( __( 'About this report', 'php-compatibility-checker' ) ) }</h2>
@@ -748,6 +673,14 @@ export function buildReportHtml( items, meta ) {
 					) }</a>`
 				: ''
 		}</p>
+		<p class="muted credit">${ esc(
+			__(
+				'PHP Compatibility Checker is made by',
+				'php-compatibility-checker'
+			)
+		) } <a href="${ esc(
+			site.maker_url || 'https://wpengine.com/'
+		) }">WP Engine</a>.</p>
 	</section>
 </main>
 </body>

@@ -113,6 +113,7 @@ class PHP_Compatibility_Checker {
 					'php'            => PHP_VERSION,
 					'wp'             => get_bloginfo( 'version' ),
 					'plugin_version' => WPEPHPCOMPAT_VERSION,
+					'maker_url'      => $this->add_wpe_campaign( 'https://wpengine.com/', 'php_compatibility_checker_report' ),
 				),
 			)
 		);
