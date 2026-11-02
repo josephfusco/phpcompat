@@ -19,7 +19,7 @@ On July 20, 2026, the end-of-support change ([wpengine/phpcompat#431](https://gi
 The notice doesn't state reasons. These were the conditions on record at the time:
 
 - **Every result depended on WP Tide** ([wptide.org](https://wptide.org)). The plugin sent each plugin's and theme's slug and version to Tide and displayed what came back. It had no scanner of its own.
-- **Tide was frozen.** Its scanning tools date from 2019 to 2022 (PHP_CodeSniffer 3.7.1, PHPCompatibility 9.3.5), and it checks a fixed list of PHP versions that ends at 8.0. In November 2026, colleagues who had offered to contribute to Tide reported that neither its maintainers nor its funders were interested. Nothing inside the plugin could get results past PHP 8.0.
+- **Tide was frozen.** Its scanning tools date from 2019 to 2022 (PHP_CodeSniffer 3.7.1, PHPCompatibility 9.3.5), and it checks a fixed list of PHP versions that ends at 8.0. Nothing inside the plugin could get results past PHP 8.0.
 - **Tide couldn't check premium or custom code.** It only audits code published on WordPress.org.
 - **Upkeep was almost all dependency churn.** In the months before the decision, nearly every commit was a Dependabot bump. There was no feature work and no fixes for user-reported issues, and 137 issues were open.
 
@@ -65,9 +65,9 @@ At around 200,000 installs, this is WP Engine's third-largest plugin on WordPres
 
 ### 4. It fits WP Engine's own PHP upgrade flow
 
-The July decision noted that WP Engine no longer recommends the plugin, because the platform has its own way to prepare for PHP upgrades: Preview PHP (and Test Driver) in the User Portal. That platform feature and this plugin do different jobs, and neither can replace the other:
+WP Engine customers can already preview a newer PHP version with Preview PHP in the User Portal. That platform feature and this plugin do different jobs, and neither can replace the other:
 
-| | PHP Compatibility Checker | Preview PHP / Test Driver |
+| | PHP Compatibility Checker | Preview PHP |
 |---|---|---|
 | Who can use it | Any WordPress site, any host | WP Engine customers |
 | How it checks | Reads the code (static analysis) against every PHP version at once | Runs the real site on one newer PHP version, for your browser only |
@@ -79,9 +79,8 @@ A plugin can't take over Preview PHP: the server picks the PHP version before Wo
 - **On the site:** on WP Engine, the plugin's sidebar already links straight to the environment's page with the Preview PHP button, and it only shows on WP Engine.
 - **In the User Portal (proposed):** the portal can show the plugin's results next to Preview PHP ("3 plugins have problems on PHP 8.4") by reading `wp php-compat scan --cached --format=json` or the Abilities API. Both exist today, return the same results as the scan page, and need no `exec()`. WP Engine gets the "check" step without building or running a scanner.
 - **In Support:** PHP upgrade campaigns or tickets that need a compatibility answer can use the same WP-CLI command instead of separate scripts or third-party scans.
-- **On the web:** instead of removing the Solution Center page and the PHP 7 blog post, point them (and one line in the PHP guide: "check your plugins first, then use Preview PHP") to a single current page.
 
-That turns "WP Engine no longer recommends it" into "it's the first step of WP Engine's PHP upgrade process", for WP Engine customers and for every site that isn't on WP Engine.
+That makes the plugin the first step of a PHP upgrade, for WP Engine customers and for every site that isn't on WP Engine.
 
 ## What maintaining it would take
 
