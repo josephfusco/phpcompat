@@ -63,8 +63,7 @@ foreach ( $needed as $package ) {
 		$files[ 'vendor/' . $relative ] = $file->getPathname();
 	}
 }
-$files['runner.php']         = __DIR__ . '/runner.php';
-$files['collect-report.php'] = __DIR__ . '/collect-report.php';
+$files['runner.php'] = __DIR__ . '/runner.php';
 ksort( $files );
 
 $hash = hash_init( 'sha256' );

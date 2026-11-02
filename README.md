@@ -29,7 +29,9 @@ The results also feed:
 
 Scanning is a resumable batch job, using the usual patterns for that:
 
-- **One request in flight**, so a scan holds at most one PHP worker.
+- **One scan per site, one request in flight.** A short lock (renewed by each request, gone two minutes after the last) keeps a second admin or tab from starting another scan, and each scan sends one request at a time, so it holds at most one PHP worker.
+- **A time budget on the server**: each request checks files one by one and stops after about 3 seconds, whatever the browser asked for, then returns the rest for the next request.
+- **The ruleset is loaded once per PHP process** and reused for every file and PHP version, instead of once per phpcs run (about a quarter of a second each).
 - **Adaptive batch size**: aims for about 2 seconds per request, grows (at most 1.5×) while requests are fast, halves after a slow or failed one. The server also caps every batch (100 files, 1 MB). Request time includes waiting on disk, so hosts with limited I/O get smaller batches.
 - **Pacing**: after a slow request, it waits a quarter of that time (at most 3 seconds) before the next, so a busy host has room for visitors.
 - **Progress you can see**: each item shows files checked, a progress bar, an estimate of the time left, and "still working…" if one request takes longer than 10 seconds.

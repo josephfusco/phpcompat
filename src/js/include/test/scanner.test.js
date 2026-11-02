@@ -12,6 +12,8 @@ const {
 	nextBatchSize,
 	timeLeft,
 	pause,
+	startScanSession,
+	endScanSession,
 	backoff,
 	classify,
 	parseJson,
@@ -333,6 +335,42 @@ describe( 'scanItem', () => {
 		await expect( settle( scanItem( job ) ) ).rejects.toThrow(
 			/stopped responding to the scan \(Failed to fetch\)/
 		);
+	} );
+
+	it( 'sends the scan token with every request, and releases the lock at the end', async () => {
+		startScanSession();
+		const calls = server( files( 12 ) );
+
+		await settle( scanItem( job ) );
+		const token = calls[ 0 ].scan_token;
+		expect( token ).toMatch( /^[a-f0-9]{32}$/ );
+		expect( calls.every( ( c ) => token === c.scan_token ) ).toBe( true );
+
+		apiFetch.mockClear();
+		apiFetch.mockResolvedValue( {} );
+		endScanSession();
+		expect( apiFetch ).toHaveBeenCalledWith( {
+			path: `/php-compat/v1/scan-lock?scan_token=${ token }`,
+			method: 'DELETE',
+		} );
+		// Only once.
+		endScanSession();
+		expect( apiFetch ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'stops at once when someone else is already scanning', async () => {
+		server( files( 3 ), {
+			fail: () =>
+				response( 409, {
+					code: 'phpcompat_scan_running',
+					message: 'Alex is already scanning this site.',
+				} ),
+		} );
+
+		await expect( settle( scanItem( job ) ) ).rejects.toThrow(
+			'Alex is already scanning this site.'
+		);
+		expect( apiFetch ).toHaveBeenCalledTimes( 1 );
 	} );
 
 	it( 'fails at once on errors retrying cannot fix', async () => {

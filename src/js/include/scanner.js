@@ -76,6 +76,7 @@ const FILE_ATTEMPTS = 2;
 /** Error codes that retrying can't fix. */
 const FATAL_CODES = [
 	'phpcompat_files_changed',
+	'phpcompat_scan_running',
 	'phpcompat_no_scanner',
 	'phpcompat_unknown_item',
 	'phpcompat_no_files',
@@ -85,6 +86,36 @@ const MAX_RESTARTS = 2;
 
 let batchSize = START_BATCH;
 let controller = new AbortController();
+// Holds the site's scan lock for one scan (see Scan_Lock); '' between scans.
+let scanToken = '';
+
+/**
+ * Start a scan: a new random token, sent with every request so the site can
+ * keep a second scan (another admin, another tab) from running at once.
+ */
+export function startScanSession() {
+	const bytes = new Uint8Array( 16 );
+	globalThis.crypto.getRandomValues( bytes );
+	scanToken = Array.from( bytes, ( b ) =>
+		b.toString( 16 ).padStart( 2, '0' )
+	).join( '' );
+}
+
+/**
+ * End a scan (finished or cancelled) and let go of the site's scan lock. If
+ * this never arrives (the tab closed), the lock expires on its own.
+ */
+export function endScanSession() {
+	if ( ! scanToken ) {
+		return;
+	}
+	const token = scanToken;
+	scanToken = '';
+	apiFetch( {
+		path: `/php-compat/v1/scan-lock?scan_token=${ token }`,
+		method: 'DELETE',
+	} ).catch( () => {} );
+}
 
 /**
  * Settings from the page (see Scanner_Bundle::browser_config()).
@@ -144,6 +175,9 @@ export async function scanItem( job, onStatus = () => {} ) {
  */
 async function scanOnce( job, onStatus, signal ) {
 	const item = { type: job.type, slug: job.slug };
+	if ( scanToken ) {
+		item.scan_token = scanToken;
+	}
 	let failures = 0;
 
 	// Wait out a failure that may pass (busy site, dropped connection), or

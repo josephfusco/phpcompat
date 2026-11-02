@@ -19,6 +19,7 @@ use WP_REST_Server;
  *
  * - POST /scan-batch Scan the next few PHP files of one plugin or theme.
  * - POST /results    Store the merged result of a finished scan.
+ * - DELETE /scan-lock Let go of the site's scan lock when a scan ends.
  *
  * Scanning is a resumable batch job, driven by the browser so no request runs
  * long enough to hit a shared host's time, memory, or worker limits:
@@ -54,6 +55,18 @@ class Rest_Controller {
 	 * Most bytes of PHP per scan request (at least one file is always scanned).
 	 */
 	const SCAN_MAX_BYTES = 1048576; // 1 MB.
+
+	/**
+	 * Seconds of scanning per request. Past this, the request stops after the
+	 * current chunk of files and the rest wait for the next request.
+	 */
+	const SCAN_TIME_BUDGET = 3.0;
+
+	/**
+	 * Share of the budget for pass 1; the rest is left for pass 2, which only
+	 * checks the files pass 1 flagged.
+	 */
+	const PASS_ONE_SHARE = 0.6;
 
 	/**
 	 * Default files per scan request, when the browser doesn't say.
@@ -104,6 +117,13 @@ class Rest_Controller {
 			'default' => '',
 		);
 
+		// Random per scan on the scan page; holds the site's scan lock (Scan_Lock).
+		$scan_token = array(
+			'type'    => 'string',
+			'pattern' => '^([A-Za-z0-9]{16,64})?$',
+			'default' => '',
+		);
+
 		register_rest_route(
 			self::ROUTE_NAMESPACE,
 			'/scan-batch',
@@ -127,8 +147,20 @@ class Rest_Controller {
 							'default' => self::SCAN_DEFAULT_FILES,
 						),
 						'fingerprint' => $fingerprint,
+						'scan_token'  => $scan_token,
 					)
 				),
+			)
+		);
+
+		register_rest_route(
+			self::ROUTE_NAMESPACE,
+			'/scan-lock',
+			array(
+				'methods'             => WP_REST_Server::DELETABLE,
+				'callback'            => array( $this, 'release_lock' ),
+				'permission_callback' => array( $this, 'can_scan' ),
+				'args'                => array( 'scan_token' => array_merge( $scan_token, array( 'required' => true ) ) ),
 			)
 		);
 
@@ -204,6 +236,24 @@ class Rest_Controller {
 
 		$cursor = (int) $request['cursor'];
 
+		// One scan at a time per site, so a second admin or tab doesn't keep a
+		// second PHP worker busy.
+		$token = (string) $request['scan_token'];
+		if ( '' !== $token ) {
+			$other = ( new Scan_Lock() )->acquire( $token, get_current_user_id() );
+			if ( $other ) {
+				$user = get_userdata( (int) ( $other['user'] ?? 0 ) );
+				return new WP_Error(
+					'phpcompat_scan_running',
+					$user
+						/* translators: %s: name of the person scanning. */
+						? sprintf( __( '%s is already scanning this site. Try again when that scan finishes.', 'php-compatibility-checker' ), $user->display_name )
+						: __( 'Another scan is already running on this site. Try again when it finishes.', 'php-compatibility-checker' ),
+					array( 'status' => 409 )
+				);
+			}
+		}
+
 		// Same hook as WP-CLI: a host can supply reports it already has.
 		if ( 0 === $cursor ) {
 			/** This filter is documented in plugin/lib/class-scanner.php */
@@ -252,20 +302,37 @@ class Rest_Controller {
 		$this->prepare_for_scan();
 
 		try {
-			$report = $batch['files'] ? Scanner_Bundle::scan_files( $base, $batch['files'] ) : array( 'versions' => array() );
+			// Pass 1 file by file until most of the time budget is used, then pass 2
+			// (each version) for the flagged files only.
+			$done   = Scanner_Bundle::flag_files( $base, $batch['files'], microtime( true ) + self::SCAN_TIME_BUDGET * self::PASS_ONE_SHARE );
+			$report = Scanner_Bundle::report_flagged( $base, $done['flagged'] );
 		} catch ( \Throwable $e ) {
 			return new WP_Error( 'phpcompat_scan_failed', $e->getMessage(), array( 'status' => 500 ) );
 		}
 
+		// Stopped early for time: the next request starts where this one ended.
+		$next = $done['checked'] < count( $batch['files'] ) ? $cursor + $done['checked'] : $batch['next'];
+
 		return new WP_REST_Response(
 			$this->batch_response(
 				Results::sanitize_report( $report ),
-				count( $batch['files'] ),
-				$batch['next'],
-				null === $batch['next'] ? '' : $list['files'][ $batch['next'] ],
+				$done['checked'],
+				$next,
+				null === $next ? '' : $list['files'][ $next ],
 				$list
 			)
 		);
+	}
+
+	/**
+	 * DELETE /scan-lock: the scan page is done (or cancelled); let another scan start.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response
+	 */
+	public function release_lock( WP_REST_Request $request ) {
+		( new Scan_Lock() )->release( (string) $request['scan_token'] );
+		return new WP_REST_Response( array( 'released' => true ) );
 	}
 
 	/**

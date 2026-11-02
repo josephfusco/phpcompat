@@ -7,7 +7,14 @@ import {
 import $ from 'jquery';
 import { hideDownload, showDownload } from './download';
 import { __, sprintf } from '@wordpress/i18n';
-import { scanItem, saveResult, cancelScans, ScanError } from './scanner';
+import {
+	scanItem,
+	saveResult,
+	cancelScans,
+	ScanError,
+	startScanSession,
+	endScanSession,
+} from './scanner';
 
 const progress = $( '.wpe-pcc-progress' );
 const progressCount = $( '.wpe-pcc-progress-count' );
@@ -33,6 +40,8 @@ export function initQueue( itemsToScan, mode ) {
 		cancelScans();
 		window.phpcompat.running = false;
 	}
+	// Let go of the site's scan lock (does nothing if no scan was running).
+	endScanSession();
 
 	hideDownload();
 	resetProgress();
@@ -156,6 +165,7 @@ export function showPlayground() {
 
 export function runNextJob() {
 	if ( window.phpcompat.queue.length === 0 ) {
+		endScanSession();
 		resetProgress();
 		showDownload();
 		finishResults();
@@ -205,6 +215,7 @@ function showProgressCount() {
  * Show the spinner and "Now scanning" at the start of a scan.
  */
 export function startProgress() {
+	startScanSession();
 	$( '.wpe-pcc-spinner' ).show();
 	progress.show();
 	showProgressCount();
