@@ -7,6 +7,6 @@
 	"testsPort": 8989,
 	"mappings": {
 		"wp-content/mu-plugins/phpcompat-e2e.php": "./tests/e2e/fixtures/phpcompat-e2e.php",
-		"wp-content/mu-plugins/phpcompat-e2e-tide.json": "./tests/e2e/fixtures/tide-fixtures.json"
+		"wp-content/mu-plugins/phpcompat-e2e-scan.json": "./tests/e2e/fixtures/scan-fixtures.json"
 	}
 }

@@ -118,4 +118,103 @@ class PhpReleasesTest extends TestCase {
 
 		$this->assertSame( 'unknown', $status['state'] );
 	}
+
+	/**
+	 * Advisories with the patched versions above (8.3.36, 8.4.27), plus a
+	 * configuration-dependent one without a fix.
+	 */
+	private function advisories() {
+		return Php_Releases::advisories();
+	}
+
+	private $safe_ini = array(
+		'session.upload_progress.enabled' => '1',
+		'session.serialize_handler'       => 'php',
+	);
+
+	public function test_exploited_advisory_makes_server_vulnerable() {
+		$status = Php_Releases::evaluate( '8.3.35', '', $this->states, $this->active(), $this->advisories(), $this->safe_ini );
+
+		$this->assertSame( 'vulnerable', $status['state'] );
+		$this->assertSame( array( 'php2shell' ), array_column( $status['advisories'], 'id' ) );
+		$this->assertSame( '8.3.36', $status['advisories'][0]['fixed_in'] );
+		$this->assertStringContainsString( 'PHP2Shell (CVE-2026-109618, CVE-2026-109619)', $status['message'] );
+		$this->assertStringContainsString( 'actively exploiting', $status['message'] );
+		$this->assertStringContainsString( 'Update to PHP 8.3.36', $status['message'] );
+	}
+
+	public function test_patched_release_is_not_vulnerable() {
+		$status = Php_Releases::evaluate( '8.3.36', '', $this->states, $this->active(), $this->advisories(), $this->safe_ini );
+
+		$this->assertSame( 'up_to_date', $status['state'] );
+		$this->assertSame( array(), $status['advisories'] );
+	}
+
+	public function test_vulnerable_even_when_php_net_is_unavailable() {
+		$status = Php_Releases::evaluate( '8.4.20', '', null, null, $this->advisories(), $this->safe_ini );
+
+		$this->assertSame( 'vulnerable', $status['state'] );
+		$this->assertStringContainsString( '8.4.27', $status['message'] );
+	}
+
+	public function test_end_of_life_branch_names_unfixed_advisory() {
+		$status = Php_Releases::evaluate( '7.4.33', '', $this->states, $this->active(), $this->advisories(), $this->safe_ini );
+
+		$this->assertSame( 'unsupported_branch', $status['state'] );
+		$this->assertSame( '', $status['advisories'][0]['fixed_in'] );
+		$this->assertStringContainsString( 'no official fix', $status['message'] );
+	}
+
+	public function test_branch_released_after_the_fix_is_not_affected() {
+		$status = Php_Releases::evaluate( '8.6.0', '', null, null, $this->advisories(), $this->safe_ini );
+
+		$this->assertSame( array(), $status['advisories'] );
+	}
+
+	public function test_vendor_build_asks_host_to_confirm_fix() {
+		$status = Php_Releases::evaluate( '8.3.6', '-0ubuntu0.24.04.13', $this->states, $this->active(), $this->advisories(), $this->safe_ini );
+
+		$this->assertSame( 'vendor_build', $status['state'] );
+		$this->assertStringContainsString( 'CVE-2026-109618', $status['message'] );
+	}
+
+	public function test_configuration_advisory_needs_every_condition() {
+		$exposed = Php_Releases::affecting(
+			'8.3.36',
+			$this->advisories(),
+			array(
+				'session.upload_progress.enabled' => '1',
+				'session.serialize_handler'       => 'php_serialize',
+			)
+		);
+		$this->assertSame( array( 'session-upload-progress' ), array_column( $exposed, 'id' ) );
+		$this->assertStringContainsString( 'session.upload_progress.enabled=0', $exposed[0]['mitigation'] );
+
+		$disabled = Php_Releases::affecting(
+			'8.3.36',
+			$this->advisories(),
+			array(
+				'session.upload_progress.enabled' => '0',
+				'session.serialize_handler'       => 'php_serialize',
+			)
+		);
+		$this->assertSame( array(), $disabled );
+	}
+
+	public function test_configuration_advisory_does_not_change_state() {
+		$status = Php_Releases::evaluate(
+			'8.3.36',
+			'',
+			$this->states,
+			$this->active(),
+			$this->advisories(),
+			array(
+				'session.upload_progress.enabled' => '1',
+				'session.serialize_handler'       => 'php_binary',
+			)
+		);
+
+		$this->assertSame( 'up_to_date', $status['state'] );
+		$this->assertSame( array( 'session-upload-progress' ), array_column( $status['advisories'], 'id' ) );
+	}
 }

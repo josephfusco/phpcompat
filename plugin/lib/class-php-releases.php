@@ -10,9 +10,11 @@ namespace WPEngine_PHPCompat;
 /**
  * Checks whether the server's PHP is the latest release of a supported branch.
  *
- * Uses php.net's release data, so there's no list of vulnerabilities to
- * maintain: if a newer patch release exists (especially one tagged as a
- * security release) or the branch no longer gets security fixes, say so.
+ * Uses php.net's release data: if a newer patch release exists (especially
+ * one tagged as a security release) or the branch no longer gets security
+ * fixes, say so. php.net doesn't say how serious a security release is, so a
+ * short list of critical advisories (see advisories()) adds that: whether this
+ * server is affected and which release fixes it.
  */
 class Php_Releases {
 
@@ -42,12 +44,129 @@ class Php_Releases {
 	 * @return array See evaluate().
 	 */
 	public function get_status() {
+		/**
+		 * Filters the critical PHP advisories checked against the server's PHP.
+		 *
+		 * @since 1.7.0
+		 *
+		 * @param array[] $advisories See Php_Releases::advisories().
+		 */
+		$advisories = apply_filters( 'wpephpcompat_php_advisories', self::advisories() );
+
 		return self::evaluate(
 			sprintf( '%d.%d.%d', PHP_MAJOR_VERSION, PHP_MINOR_VERSION, PHP_RELEASE_VERSION ),
 			PHP_EXTRA_VERSION,
 			$this->fetch( 'states', self::STATES_URL ),
-			$this->fetch( 'active', self::ACTIVE_URL )
+			$this->fetch( 'active', self::ACTIVE_URL ),
+			is_array( $advisories ) ? $advisories : array(),
+			array(
+				'session.upload_progress.enabled' => (string) ini_get( 'session.upload_progress.enabled' ),
+				'session.serialize_handler'       => (string) ini_get( 'session.serialize_handler' ),
+			)
 		);
+	}
+
+	/**
+	 * Critical PHP vulnerabilities worth naming on their own.
+	 *
+	 * Only for flaws serious enough that "a security release is available"
+	 * undersells them: remote code execution, especially when exploited.
+	 *
+	 * @since 1.7.0
+	 *
+	 * @return array[] Each advisory: {
+	 *     @type string   $id         Stable identifier.
+	 *     @type string   $name       Common name, or empty.
+	 *     @type string[] $cves       CVE IDs.
+	 *     @type string   $url        Where to read more.
+	 *     @type bool     $exploited  Whether it is known to be exploited.
+	 *     @type string   $since      First affected version.
+	 *     @type string[] $fixed      Fixed release per branch, e.g. '8.3' => '8.3.36'. Empty if no fix yet.
+	 *     @type array    $conditions Optional ini settings that must all match for the server to be exposed:
+	 *                                setting => list of matching values.
+	 *     @type string   $mitigation Optional workaround until a fix ships.
+	 * }
+	 */
+	public static function advisories() {
+		return array(
+			array(
+				'id'         => 'php2shell',
+				'name'       => 'PHP2Shell',
+				'cves'       => array( 'CVE-2026-109618', 'CVE-2026-109619' ),
+				'url'        => 'https://www.cisa.gov/news-events/alerts/2026/10/21/critical-vulnerabilities-php-require-immediate-patching',
+				'exploited'  => true,
+				'since'      => '5.4.0',
+				'fixed'      => array(
+					'8.2' => '8.2.35',
+					'8.3' => '8.3.36',
+					'8.4' => '8.4.27',
+					'8.5' => '8.5.12',
+				),
+				'conditions' => array(),
+				'mitigation' => '',
+			),
+			array(
+				'id'         => 'session-upload-progress',
+				'name'       => '',
+				'cves'       => array( 'CVE-2026-115560' ),
+				'url'        => 'https://www.cve.org/CVERecord?id=CVE-2026-115560',
+				'exploited'  => false,
+				'since'      => '5.4.0',
+				'fixed'      => array(),
+				'conditions' => array(
+					'session.upload_progress.enabled' => array( '1', 'on', 'On', 'true' ),
+					'session.serialize_handler'       => array( 'php_binary', 'php_serialize' ),
+				),
+				'mitigation' => __( 'Until PHP releases a fix, set session.upload_progress.enabled=0 in php.ini and restart PHP. Your host can do this for you.', 'php-compatibility-checker' ),
+			),
+		);
+	}
+
+	/**
+	 * Advisories that affect a PHP version and configuration.
+	 *
+	 * @since 1.7.0
+	 *
+	 * @param string  $version    Version as major.minor.release.
+	 * @param array[] $advisories See advisories().
+	 * @param array   $ini        Current ini values, setting => value.
+	 * @return array[] Matching advisories, each with fixed_in (the fix for this branch, or empty if none).
+	 */
+	public static function affecting( $version, $advisories, $ini = array() ) {
+		$parts   = explode( '.', $version );
+		$branch  = $parts[0] . '.' . ( isset( $parts[1] ) ? $parts[1] : '0' );
+		$matches = array();
+
+		foreach ( $advisories as $advisory ) {
+			if ( ! empty( $advisory['since'] ) && version_compare( $version, $advisory['since'], '<' ) ) {
+				continue;
+			}
+
+			$fixed = isset( $advisory['fixed'] ) ? (array) $advisory['fixed'] : array();
+			if ( isset( $fixed[ $branch ] ) ) {
+				if ( version_compare( $version, $fixed[ $branch ], '>=' ) ) {
+					continue;
+				}
+			} elseif ( $fixed ) {
+				// Branches newer than every fixed one were released after the fix.
+				$fixed_branches = array_keys( $fixed );
+				usort( $fixed_branches, 'version_compare' );
+				if ( version_compare( $branch, end( $fixed_branches ), '>' ) ) {
+					continue;
+				}
+			}
+
+			foreach ( isset( $advisory['conditions'] ) ? (array) $advisory['conditions'] : array() as $setting => $values ) {
+				if ( ! isset( $ini[ $setting ] ) || ! in_array( (string) $ini[ $setting ], (array) $values, true ) ) {
+					continue 2;
+				}
+			}
+
+			$advisory['fixed_in'] = isset( $fixed[ $branch ] ) ? $fixed[ $branch ] : '';
+			$matches[]            = $advisory;
+		}
+
+		return $matches;
 	}
 
 	/**
@@ -57,8 +176,10 @@ class Php_Releases {
 	 * @param string     $extra_version PHP_EXTRA_VERSION, e.g. "-1ubuntu1" for distribution builds.
 	 * @param array|null $states        php.net states.php data, or null if unavailable.
 	 * @param array|null $active        php.net active.php data, or null if unavailable.
+	 * @param array[]    $advisories    Critical advisories to check (see advisories()).
+	 * @param array      $ini           Current ini values, for advisories that depend on configuration.
 	 * @return array {
-	 *     @type string   $state                up_to_date, update_available, unsupported_branch, vendor_build, or unknown.
+	 *     @type string   $state                vulnerable, up_to_date, update_available, unsupported_branch, vendor_build, or unknown.
 	 *     @type string   $current              The version checked.
 	 *     @type string   $branch               Major.minor.
 	 *     @type string   $latest               Latest release of the branch, if known.
@@ -67,9 +188,10 @@ class Php_Releases {
 	 *     @type string   $security_support_end Date (Y-m-d) the branch stops/stopped getting security fixes, if known.
 	 *     @type string[] $supported_branches   Branches that still get security fixes.
 	 *     @type string   $message              Plain-language summary.
+	 *     @type array[]  $advisories           Critical advisories that affect this server (see affecting()).
 	 * }
 	 */
-	public static function evaluate( $version, $extra_version, $states, $active ) {
+	public static function evaluate( $version, $extra_version, $states, $active, $advisories = array(), $ini = array() ) {
 		$parts  = explode( '.', $version );
 		$major  = $parts[0];
 		$branch = $parts[0] . '.' . ( isset( $parts[1] ) ? $parts[1] : '0' );
@@ -87,7 +209,25 @@ class Php_Releases {
 			'security_support_end' => $branch_state && isset( $branch_state['security_support_end'] ) ? substr( (string) $branch_state['security_support_end'], 0, 10 ) : '',
 			'supported_branches'   => self::supported_branches( $states ),
 			'message'              => __( 'Couldn\'t check php.net for the latest PHP releases.', 'php-compatibility-checker' ),
+			'advisories'           => self::affecting( $version, $advisories, $ini ),
 		);
+
+		$status = self::evaluate_release( $status, $version, $extra_version, $branch_state );
+
+		return self::apply_advisories( $status );
+	}
+
+	/**
+	 * Release state from php.net data alone.
+	 *
+	 * @param array      $status        Status so far.
+	 * @param string     $version       Version as major.minor.release.
+	 * @param string     $extra_version PHP_EXTRA_VERSION.
+	 * @param array|null $branch_state  php.net state for the branch.
+	 * @return array Status.
+	 */
+	private static function evaluate_release( $status, $version, $extra_version, $branch_state ) {
+		$branch = $status['branch'];
 
 		if ( ! $branch_state ) {
 			return $status;
@@ -153,6 +293,98 @@ class Php_Releases {
 		);
 
 		return $status;
+	}
+
+	/**
+	 * Fold critical advisories into the state and message.
+	 *
+	 * Version-based advisories make the state "vulnerable" (unless the branch is
+	 * already unsupported or a host build that may carry the fix). Advisories
+	 * that depend on configuration are returned in $status['advisories'] with
+	 * their mitigation, and don't change the state.
+	 *
+	 * @param array $status Status from evaluate_release().
+	 * @return array Status.
+	 */
+	private static function apply_advisories( $status ) {
+		$by_version = array_values(
+			array_filter(
+				$status['advisories'],
+				static function ( $advisory ) {
+					return empty( $advisory['conditions'] );
+				}
+			)
+		);
+
+		if ( ! $by_version ) {
+			return $status;
+		}
+
+		$names     = implode( '; ', array_map( array( __CLASS__, 'label' ), $by_version ) );
+		$exploited = (bool) array_filter( array_column( $by_version, 'exploited' ) );
+		$fixes     = array_filter( array_column( $by_version, 'fixed_in' ) );
+		usort( $fixes, 'version_compare' );
+		$fix = $fixes ? end( $fixes ) : '';
+
+		if ( 'vendor_build' === $status['state'] ) {
+			$status['message'] .= ' ' . sprintf(
+				/* translators: %s: vulnerability names and CVE IDs. */
+				__( 'Confirm with your host that this build includes the fixes for %s.', 'php-compatibility-checker' ),
+				$names
+			);
+			return $status;
+		}
+
+		if ( 'unsupported_branch' === $status['state'] ) {
+			$status['message'] .= ' ' . sprintf(
+				$exploited
+					/* translators: %s: vulnerability names and CVE IDs. */
+					? __( 'It is also affected by %s, which attackers are actively exploiting, and PHP has no official fix for this version.', 'php-compatibility-checker' )
+					/* translators: %s: vulnerability names and CVE IDs. */
+					: __( 'It is also affected by %s, and PHP has no official fix for this version.', 'php-compatibility-checker' ),
+				$names
+			);
+			return $status;
+		}
+
+		$status['state'] = 'vulnerable';
+
+		if ( '' === $fix ) {
+			$status['message'] = sprintf(
+				$exploited
+					/* translators: 1: PHP version, 2: vulnerability names and CVE IDs. */
+					? __( 'PHP %1$s is affected by %2$s, a critical flaw that attackers are actively exploiting to take over servers. There is no official fix for this version: move to a supported PHP version now.', 'php-compatibility-checker' )
+					/* translators: 1: PHP version, 2: vulnerability names and CVE IDs. */
+					: __( 'PHP %1$s is affected by %2$s, a critical flaw. There is no official fix for this version: move to a supported PHP version.', 'php-compatibility-checker' ),
+				$status['current'],
+				$names
+			);
+			return $status;
+		}
+
+		$status['message'] = sprintf(
+			$exploited
+				/* translators: 1: PHP version, 2: vulnerability names and CVE IDs, 3: fixed PHP version. */
+				? __( 'PHP %1$s is affected by %2$s, a critical flaw that attackers are actively exploiting to take over servers. Update to PHP %3$s or newer now; your host can do this for you.', 'php-compatibility-checker' )
+				/* translators: 1: PHP version, 2: vulnerability names and CVE IDs, 3: fixed PHP version. */
+				: __( 'PHP %1$s is affected by %2$s, a critical flaw. Update to PHP %3$s or newer; your host can do this for you.', 'php-compatibility-checker' ),
+			$status['current'],
+			$names,
+			$fix
+		);
+
+		return $status;
+	}
+
+	/**
+	 * "PHP2Shell (CVE-…, CVE-…)", or just the CVE IDs when there is no name.
+	 *
+	 * @param array $advisory Advisory.
+	 * @return string
+	 */
+	public static function label( $advisory ) {
+		$cves = implode( ', ', (array) $advisory['cves'] );
+		return '' !== $advisory['name'] ? sprintf( '%1$s (%2$s)', $advisory['name'], $cves ) : $cves;
 	}
 
 	/**

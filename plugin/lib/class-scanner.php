@@ -8,33 +8,24 @@
 namespace WPEngine_PHPCompat;
 
 /**
- * Looks up Tide results for plugins and themes and turns them into statuses.
+ * Turns scan reports into statuses for plugins and themes.
  *
- * Applies the same rules as the scan page: versions below an item's
- * "Requires PHP" aren't counted, items with nothing checkable are
- * "not_checked", and items Tide doesn't know (not on WordPress.org) are skipped.
+ * Reports come from stored results (scans run in the browser or by WP-CLI) or
+ * from scanning the installed files right now (WP-CLI). Applies the same rules
+ * as the scan page: versions below an item's "Requires PHP" aren't counted,
+ * and items with nothing checkable are "not_checked".
  */
 class Scanner {
 
 	/**
-	 * Tide audit endpoint.
+	 * Use stored results only.
 	 */
-	const TIDE_URL = 'https://wptide.org/api/v1/audit/wporg/%s/%s/%s?reports=phpcs_phpcompatibilitywp';
+	const MODE_STORED = 'stored';
 
 	/**
-	 * Where results come from, included in scan output.
+	 * Scan the installed files now (WP-CLI), and store the result.
 	 */
-	const SOURCE = 'Tide (wptide.org), using PHPCompatibilityWP';
-
-	/**
-	 * Cache lifetime for completed audits. Tide results for a given release don't change.
-	 */
-	const CACHE_COMPLETE = WEEK_IN_SECONDS;
-
-	/**
-	 * Cache lifetime for "not on WordPress.org" responses.
-	 */
-	const CACHE_NOT_FOUND = DAY_IN_SECONDS;
+	const MODE_LIVE = 'live';
 
 	/**
 	 * Provides the list of plugins and themes.
@@ -104,8 +95,10 @@ class Scanner {
 	/**
 	 * Scan items.
 	 *
-	 * @param array[] $items           Items from get_items().
-	 * @param bool    $include_details Include file, line, and message for each problem.
+	 * @param array[]  $items           Items from get_items().
+	 * @param bool     $include_details Include file, line, and message for each problem.
+	 * @param string   $mode            MODE_STORED or MODE_LIVE.
+	 * @param callable $progress        Optional. Called with each item before it is scanned (live mode).
 	 * @return array {
 	 *     @type array[] $items           Result per item (see scan_item()).
 	 *     @type array   $summary         Count per status.
@@ -113,13 +106,16 @@ class Scanner {
 	 *     @type string  $source          Where results come from.
 	 * }
 	 */
-	public function scan( $items, $include_details = false ) {
+	public function scan( $items, $include_details = false, $mode = self::MODE_STORED, $progress = null ) {
 		$results = array();
-		$summary = array_fill_keys( array( 'passes', 'problems', 'not_checked', 'pending', 'failed' ), 0 );
+		$summary = array_fill_keys( self::STATUSES, 0 );
 		$max     = '';
 
 		foreach ( $items as $item ) {
-			$result = $this->scan_item( $item, $include_details );
+			if ( is_callable( $progress ) ) {
+				call_user_func( $progress, $item );
+			}
+			$result = $this->scan_item( $item, $include_details, $mode );
 			++$summary[ $result['status'] ];
 
 			if ( $result['max_php_checked'] && ( ! $max || version_compare( $result['max_php_checked'], $max, '>' ) ) ) {
@@ -133,33 +129,110 @@ class Scanner {
 			'items'           => $results,
 			'summary'         => $summary,
 			'max_php_checked' => $max,
-			'source'          => self::SOURCE,
+			'source'          => self::source(),
 		);
+	}
+
+	/**
+	 * Every status an item can have.
+	 */
+	const STATUSES = array( 'passes', 'problems', 'not_checked', 'not_scanned', 'failed' );
+
+	/**
+	 * Where results come from, included in scan output.
+	 *
+	 * @return string
+	 */
+	public static function source() {
+		return sprintf( 'PHPCompatibilityWP (%s)', Scanner_Bundle::ruleset() );
 	}
 
 	/**
 	 * Scan one item.
 	 *
-	 * @param array $item            Item from get_items().
-	 * @param bool  $include_details Include file, line, and message for each problem.
+	 * @param array  $item            Item from get_items().
+	 * @param bool   $include_details Include file, line, and message for each problem.
+	 * @param string $mode            MODE_STORED or MODE_LIVE.
 	 * @return array Item fields plus status, reason, php (version => pass|fail|not_counted),
-	 *               failing_versions, max_php_checked, and problems (when requested).
+	 *               failing_versions, max_php_checked, scanned_at, and problems (when requested).
 	 */
-	public function scan_item( $item, $include_details = false ) {
-		$audit = $this->fetch_audit( $item );
+	public function scan_item( $item, $include_details = false, $mode = self::MODE_STORED ) {
+		$results = new Results();
 
-		if ( 'complete' !== $audit['state'] ) {
-			return $this->result( $item, $audit['state'], $audit['reason'] );
+		if ( self::MODE_LIVE === $mode ) {
+			$root = self::item_root( $item );
+			if ( '' === $root && ! has_filter( 'wpephpcompat_pre_scan_report' ) ) {
+				return $this->result( $item, 'failed', __( 'Couldn\'t find this plugin\'s or theme\'s files.', 'php-compatibility-checker' ) );
+			}
+			try {
+				/**
+				 * Filters the report for an item before WP-CLI scans its files.
+				 *
+				 * Return a report (see Results::sanitize_report()) to use it instead of
+				 * scanning, e.g. results your host already has. Null scans as usual.
+				 *
+				 * @since 1.7.0
+				 *
+				 * @param array|null $report Report, or null to scan.
+				 * @param array      $item   Item from get_items().
+				 */
+				$report = apply_filters( 'wpephpcompat_pre_scan_report', null, $item );
+				$stored = $results->save( $item, is_array( $report ) ? $report : Scanner_Bundle::scan_directory( $root ), 'local' );
+			} catch ( \Throwable $e ) {
+				return $this->result( $item, 'failed', $e->getMessage() );
+			}
+		} else {
+			$stored = $results->get( $item );
+			if ( ! $stored ) {
+				return $this->result( $item, 'not_scanned', __( 'Not scanned yet with this version. Run a scan in Tools > PHP Compatibility, or with wp php-compat scan.', 'php-compatibility-checker' ) );
+			}
 		}
 
-		return $this->evaluate( $item, $audit['report'], $include_details );
+		$result               = $this->evaluate( $item, $stored['report'], $include_details );
+		$result['scanned_at'] = gmdate( 'c', (int) $stored['scanned_at'] );
+
+		return $result;
 	}
 
 	/**
-	 * Turn a Tide report into a result for the item.
+	 * Absolute path of an item's directory (or single file, for one-file plugins).
+	 *
+	 * @param array $item Item with type and file.
+	 * @return string Real path, or empty if not found.
+	 */
+	public static function item_root( $item ) {
+		$file = isset( $item['file'] ) ? (string) $item['file'] : '';
+
+		// Without a file there's nothing to resolve; never fall back to the whole directory.
+		if ( '' === $file || false !== strpos( $file, '..' ) || 0 === strpos( $file, '/' ) ) {
+			return '';
+		}
+
+		if ( 'theme' === $item['type'] ) {
+			$theme = wp_get_theme( $file );
+			$path  = $theme->exists() ? $theme->get_stylesheet_directory() : '';
+		} else {
+			$main = WP_PLUGIN_DIR . '/' . $file;
+			// One-file plugins (e.g. hello.php) are scanned on their own, not with their neighbours.
+			$path = false === strpos( $file, '/' ) ? $main : dirname( $main );
+		}
+
+		$real = '' !== $path ? realpath( $path ) : false;
+		if ( false === $real ) {
+			return '';
+		}
+
+		// Must be inside (never equal to) the plugins or themes directory.
+		$parent = realpath( 'theme' === $item['type'] ? get_theme_root( $file ) : WP_PLUGIN_DIR );
+
+		return false !== $parent && 0 === strpos( $real, $parent . '/' ) ? $real : '';
+	}
+
+	/**
+	 * Turn a scan report into a result for the item.
 	 *
 	 * @param array $item            Item from get_items().
-	 * @param array $report          Tide "report" object.
+	 * @param array $report          Report (see Results::sanitize_report()).
 	 * @param bool  $include_details Include file, line, and message for each problem.
 	 * @return array Result (see scan_item()).
 	 */
@@ -168,7 +241,7 @@ class Scanner {
 		usort( $versions, 'version_compare' );
 
 		if ( ! $versions ) {
-			return $this->result( $item, 'failed', __( 'Tide returned no results for this item.', 'php-compatibility-checker' ) );
+			return $this->result( $item, 'failed', __( 'The scan returned no results for this item.', 'php-compatibility-checker' ) );
 		}
 
 		$requires     = $item['requires_php'];
@@ -184,10 +257,9 @@ class Scanner {
 				continue;
 			}
 
+			// Errors fail a version; warnings (deprecations) still run.
 			$totals = isset( $report['versions'][ $version ]['totals'] ) ? $report['versions'][ $version ]['totals'] : array();
-			$fails  = in_array( $version, $incompatible, true )
-				|| ! empty( $totals['errors'] )
-				|| ! empty( $totals['warnings'] );
+			$fails  = in_array( $version, $incompatible, true ) || ! empty( $totals['errors'] );
 
 			$php[ $version ] = $fails ? 'fail' : 'pass';
 
@@ -223,69 +295,6 @@ class Scanner {
 		}
 
 		return $result;
-	}
-
-	/**
-	 * Fetch (or read cached) Tide audit for an item.
-	 *
-	 * @param array $item Item from get_items().
-	 * @return array {
-	 *     @type string $state  complete, pending, not_checked, or failed.
-	 *     @type string $reason Explanation when not complete.
-	 *     @type array  $report Tide report when complete.
-	 * }
-	 */
-	public function fetch_audit( $item ) {
-		$cache_key = 'wpephpcompat_tide_' . md5( $item['type'] . '/' . $item['slug'] . '/' . $item['version'] );
-		$cached    = get_transient( $cache_key );
-
-		if ( is_array( $cached ) ) {
-			return $cached;
-		}
-
-		$response = wp_remote_get(
-			sprintf( self::TIDE_URL, rawurlencode( $item['type'] ), rawurlencode( $item['slug'] ), rawurlencode( $item['version'] ) ),
-			array( 'timeout' => 20 )
-		);
-
-		if ( is_wp_error( $response ) ) {
-			return $this->audit_state( 'failed', $response->get_error_message() );
-		}
-
-		$code = (int) wp_remote_retrieve_response_code( $response );
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-
-		if ( 404 === $code ) {
-			$audit = $this->audit_state( 'not_checked', __( 'Not available on WordPress.org, so it can\'t be checked.', 'php-compatibility-checker' ) );
-			set_transient( $cache_key, $audit, self::CACHE_NOT_FOUND );
-			return $audit;
-		}
-
-		if ( 200 !== $code || ! is_array( $body ) ) {
-			/* translators: %d: HTTP status code. */
-			return $this->audit_state( 'failed', sprintf( __( 'Tide returned HTTP %d.', 'php-compatibility-checker' ), $code ) );
-		}
-
-		$status = isset( $body['status'] ) ? $body['status'] : '';
-
-		if ( 'pending' === $status ) {
-			return $this->audit_state( 'pending', __( 'Tide is still auditing this version. Try again in a few minutes.', 'php-compatibility-checker' ) );
-		}
-
-		$report = isset( $body['reports']['phpcs_phpcompatibilitywp']['report'] ) ? $body['reports']['phpcs_phpcompatibilitywp']['report'] : null;
-
-		if ( 'complete' !== $status || ! is_array( $report ) ) {
-			return $this->audit_state( 'failed', __( 'No scan results found.', 'php-compatibility-checker' ) );
-		}
-
-		$audit = array(
-			'state'  => 'complete',
-			'reason' => '',
-			'report' => $report,
-		);
-		set_transient( $cache_key, $audit, self::CACHE_COMPLETE );
-
-		return $audit;
 	}
 
 	/**
@@ -333,6 +342,8 @@ class Scanner {
 			'version'      => (string) $item['version'],
 			'active'       => 'yes' === $item['active'],
 			'requires_php' => isset( $item['requires_php'] ) ? (string) $item['requires_php'] : '',
+			'source'       => isset( $item['source'] ) ? (string) $item['source'] : 'local',
+			'file'         => isset( $item['file'] ) ? (string) $item['file'] : '',
 		);
 	}
 
@@ -340,8 +351,8 @@ class Scanner {
 	 * Base result for an item.
 	 *
 	 * @param array  $item   Item from get_items().
-	 * @param string $status passes, problems, not_checked, pending, or failed.
-	 * @param string $reason Explanation for not_checked, pending, or failed.
+	 * @param string $status One of STATUSES.
+	 * @param string $reason Explanation for not_checked, not_scanned, or failed.
 	 * @return array
 	 */
 	private function result( $item, $status, $reason = '' ) {
@@ -353,29 +364,15 @@ class Scanner {
 				'php'              => array(),
 				'failing_versions' => array(),
 				'max_php_checked'  => '',
+				'scanned_at'       => '',
 			)
-		);
-	}
-
-	/**
-	 * Audit state without a report.
-	 *
-	 * @param string $state  pending, not_checked, or failed.
-	 * @param string $reason Explanation.
-	 * @return array
-	 */
-	private function audit_state( $state, $reason ) {
-		return array(
-			'state'  => $state,
-			'reason' => $reason,
-			'report' => null,
 		);
 	}
 
 	/**
 	 * Problems reported for one PHP version.
 	 *
-	 * @param array $version_report Tide report for a single PHP version.
+	 * @param array $version_report Report for a single PHP version.
 	 * @return array[] Each with file, line, type, message, and source.
 	 */
 	private function problems_for_version( $version_report ) {

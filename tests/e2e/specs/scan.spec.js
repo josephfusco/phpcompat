@@ -2,7 +2,7 @@
  * End-to-end tests for the PHP Compatibility scan page.
  */
 const { test, expect } = require( '@wordpress/e2e-test-utils-playwright' );
-const { mockTide } = require( './tide-mock' );
+const { mockScanner } = require( './scanner-mock' );
 
 const PAGE = [ 'tools.php', 'page=wpe-php-compat' ];
 
@@ -34,6 +34,14 @@ function results( page, result ) {
 	return page.locator( `#wpe_pcc_results [data-result="${ result }"]` );
 }
 
+async function setOption( requestUtils, name, enabled ) {
+	await requestUtils.rest( {
+		method: 'POST',
+		path: '/wp/v2/settings',
+		data: { [ name ]: enabled },
+	} );
+}
+
 async function setWpEngine( requestUtils, enabled ) {
 	await requestUtils.rest( {
 		method: 'POST',
@@ -47,6 +55,11 @@ test.describe( 'PHP Compatibility scan', () => {
 
 	test.beforeEach( async ( { page, requestUtils } ) => {
 		await setWpEngine( requestUtils, false );
+		await setOption( requestUtils, 'phpcompat_e2e_advisory', false );
+		await requestUtils.rest( {
+			method: 'POST',
+			path: '/phpcompat-e2e/v1/reset',
+		} );
 		pageErrors = [];
 		page.on( 'pageerror', ( error ) => pageErrors.push( error.message ) );
 	} );
@@ -59,7 +72,7 @@ test.describe( 'PHP Compatibility scan', () => {
 		admin,
 		page,
 	} ) => {
-		const requested = await mockTide( page );
+		const requested = await mockScanner( page );
 		await admin.visitAdminPage( ...PAGE );
 
 		await expect(
@@ -75,28 +88,29 @@ test.describe( 'PHP Compatibility scan', () => {
 		await scanFinished( page );
 
 		expect( requested ).not.toContain( 'inactive-plugin' );
-		await expect( results( page, 'success' ) ).toHaveCount( 2 );
+		await expect( results( page, 'success' ) ).toHaveCount( 3 );
 		await expect( results( page, 'problems' ) ).toHaveCount( 1 );
-		await expect( results( page, 'skipped' ) ).toHaveCount( 2 );
+		await expect( results( page, 'skipped' ) ).toHaveCount( 1 );
 
 		// Below "Requires PHP": marked as not counted, not as a failure.
 		const problem = page.locator( '#plugin_problem-plugin' );
 		await expect( problem ).toContainText( '1 error' );
 		await expect(
 			problem.locator( '.wpe-pcc-php-version-unsupported', {
-				hasText: '7.0',
+				hasText: '7.4',
 			} )
 		).toBeVisible();
-		await expect( problem ).toContainText( 'minimum of PHP 7.2' );
+		await expect( problem ).toContainText( 'minimum of PHP 8.0' );
 
-		// Requires a newer PHP than any version with results.
+		// Requires a newer PHP than any version checked.
 		await expect( page.locator( '#plugin_new-php-plugin' ) ).toContainText(
-			'requires PHP 8.3 or newer'
+			'requires PHP 8.6 or newer'
 		);
 
-		// Not on WordPress.org (#323).
-		await expect( page.locator( '#plugin_custom-plugin' ) ).toContainText(
-			'could not be scanned'
+		// Not on WordPress.org: scanned from this site's files (#323).
+		await expect( page.locator( '#plugin_custom-plugin' ) ).toHaveAttribute(
+			'data-result',
+			'success'
 		);
 
 		// Problems: try them in Playground instead of the old LocalWP link.
@@ -110,7 +124,7 @@ test.describe( 'PHP Compatibility scan', () => {
 	} );
 
 	test( 'scans all plugins and themes', async ( { admin, page } ) => {
-		const requested = await mockTide( page );
+		const requested = await mockScanner( page );
 		await admin.visitAdminPage( ...PAGE );
 		await page
 			.getByRole( 'radio', { name: 'Scan all plugins and themes' } )
@@ -122,14 +136,14 @@ test.describe( 'PHP Compatibility scan', () => {
 		await scanButton( page ).click();
 		await scanFinished( page );
 		expect( requested ).toContain( 'inactive-plugin' );
-		await expect( results( page, 'success' ) ).toHaveCount( 3 );
+		await expect( results( page, 'success' ) ).toHaveCount( 4 );
 	} );
 
 	test( 'chooses which plugins and themes to scan (#67)', async ( {
 		admin,
 		page,
 	} ) => {
-		const requested = await mockTide( page );
+		const requested = await mockScanner( page );
 		await admin.visitAdminPage( ...PAGE );
 		await page
 			.getByRole( 'radio', {
@@ -163,27 +177,64 @@ test.describe( 'PHP Compatibility scan', () => {
 		await expect( notice ).toContainText( 'includes security fixes' );
 	} );
 
+	test( 'flags a critical PHP advisory that affects the server', async ( {
+		admin,
+		page,
+		requestUtils,
+	} ) => {
+		await setOption( requestUtils, 'phpcompat_e2e_advisory', true );
+		await admin.visitAdminPage( ...PAGE );
+
+		const notice = page.locator( '.wpe-pcc-release-notice.notice-error' );
+		await expect( notice ).toContainText( 'E2E Shell (CVE-2099-0001)' );
+		await expect( notice ).toContainText( 'actively exploiting' );
+		await expect(
+			notice.getByRole( 'link', { name: /About E2E Shell/ } )
+		).toHaveAttribute( 'href', 'https://example.com/e2e' );
+	} );
+
+	test( 'reuses stored results for WordPress.org code, rescans local code', async ( {
+		admin,
+		page,
+	} ) => {
+		const requested = await mockScanner( page );
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+		await scanFinished( page );
+		// Results are saved in the background; let those requests land.
+		await page.waitForLoadState( 'networkidle' );
+		requested.length = 0;
+
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+		await scanFinished( page );
+
+		// Only the custom plugin's files can change without a new version.
+		expect( requested ).toEqual( [ 'custom-plugin' ] );
+		await expect( results( page, 'problems' ) ).toHaveCount( 1 );
+	} );
+
 	test( 'failing versions open and close their details', async ( {
 		admin,
 		page,
 	} ) => {
-		await mockTide( page );
+		await mockScanner( page );
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
 
 		const problem = page.locator( '#plugin_problem-plugin' );
 		const version = problem.getByRole( 'button', {
-			name: 'Show problems on PHP 7.2',
+			name: 'Show problems on PHP 8.0',
 		} );
 		await expect( version ).toHaveAttribute( 'aria-expanded', 'false' );
 
 		await version.click();
 		await expect( version ).toHaveAttribute( 'aria-expanded', 'true' );
 		const report = problem.locator(
-			'.wpe-pcc-php-version-report[data-php-version="7.2"]'
+			'.wpe-pcc-php-version-report[data-php-version="8.0"]'
 		);
 		await expect( report.locator( 'textarea' ) ).toHaveValue(
-			/Example problem on PHP 7\.2/
+			/Example problem on PHP 8\.0/
 		);
 
 		await report.getByRole( 'link', { name: 'close' } ).click();
@@ -192,64 +243,35 @@ test.describe( 'PHP Compatibility scan', () => {
 		await expect( version ).toBeFocused();
 	} );
 
-	test( 'explains when WP Tide cannot be reached (#231)', async ( {
-		admin,
-		page,
-	} ) => {
-		await mockTide( page );
-		// Routes added later take priority: block one item's request.
-		await page.route( '**/wporg/plugin/passing-plugin/**', ( route ) =>
-			route.abort( 'blockedbyclient' )
-		);
+	test( 'explains when a scan fails (#231)', async ( { admin, page } ) => {
+		await mockScanner( page, {
+			fail: {
+				'passing-plugin':
+					'Could not load the scanner from WordPress Playground (playground.wordpress.net).',
+			},
+		} );
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
 
 		const item = page.locator( '#plugin_passing-plugin' );
 		await expect( item ).toContainText( 'Scan failed' );
-		await expect( item ).toContainText( 'Could not connect to WP Tide' );
+		await expect( item ).toContainText( 'WordPress Playground' );
 		await expect( item ).not.toContainText( 'Status: 0' );
 	} );
 
-	test( 'shows progress while Tide audits a new version (#42)', async ( {
-		admin,
-		page,
-	} ) => {
-		await mockTide( page );
-		let calls = 0;
-		await page.route( '**/wporg/plugin/passing-plugin/**', ( route ) => {
-			calls++;
-			if ( calls > 1 ) {
-				return route.fallback();
-			}
-			return route.fulfill( {
-				status: 200,
-				contentType: 'application/json',
-				headers: { 'Access-Control-Allow-Origin': '*' },
-				body: JSON.stringify( { status: 'pending' } ),
-			} );
-		} );
+	test( 'shows progress while scanning (#42)', async ( { admin, page } ) => {
+		await mockScanner( page, { hold: [ 'passing-plugin' ] } );
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
 
 		const item = page.locator( '#plugin_passing-plugin' );
-		await expect( item ).toContainText( 'auditing this version' );
-		await expect( item ).toHaveAttribute( 'data-result', 'success', {
-			timeout: 15000,
-		} );
+		await expect( item ).toContainText( 'Checking PHP 7.4' );
+		await page.evaluate( () => window.phpcompatRelease() );
+		await expect( item ).toHaveAttribute( 'data-result', 'success' );
 	} );
 
 	test( 'cancels a running scan (#56)', async ( { admin, page } ) => {
-		await mockTide( page );
-		// Hold one request open so the scan is still running.
-		let release;
-		const held = new Promise( ( resolve ) => ( release = resolve ) );
-		await page.route(
-			'**/wporg/plugin/passing-plugin/**',
-			async ( route ) => {
-				await held;
-				return route.fallback().catch( () => {} );
-			}
-		);
+		await mockScanner( page, { hold: [ 'passing-plugin' ] } );
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
 		await expect( page.locator( '.wpe-pcc-progress' ) ).toContainText(
@@ -257,7 +279,8 @@ test.describe( 'PHP Compatibility scan', () => {
 		);
 
 		await page.getByRole( 'link', { name: 'Cancel' } ).click();
-		release();
+		// The cancelled scan finishing late must not touch the new one.
+		await page.evaluate( () => window.phpcompatRelease() );
 
 		await expect( page.locator( '.wpe-pcc-progress' ) ).toBeHidden();
 		await expect( scanButton( page ) ).toBeEnabled();
@@ -266,7 +289,6 @@ test.describe( 'PHP Compatibility scan', () => {
 		);
 
 		// A new scan counts from zero.
-		await page.unroute( '**/wporg/plugin/passing-plugin/**' );
 		await scanButton( page ).click();
 		await scanFinished( page );
 		const progress = await page.evaluate( () => [
@@ -280,7 +302,7 @@ test.describe( 'PHP Compatibility scan', () => {
 		admin,
 		page,
 	} ) => {
-		await mockTide( page );
+		await mockScanner( page );
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
 		await scanFinished( page );
@@ -313,9 +335,9 @@ test.describe( 'PHP Compatibility scan', () => {
 		);
 		expect( txt.text ).toContain( 'Site:        http://localhost:8889' );
 		expect( txt.text ).toContain(
-			'Summary:     2 pass, 1 with problems, 2 not checked, 0 failed to scan'
+			'Summary:     3 pass, 1 with problems, 1 not checked, 0 failed to scan'
 		);
-		expect( txt.text ).toContain( 'Example problem on PHP 7.2' );
+		expect( txt.text ).toContain( 'Example problem on PHP 8.0' );
 
 		const csv = await download( 'csv' );
 		const rows = csv.text.split( '\r\n' );
@@ -323,19 +345,19 @@ test.describe( 'PHP Compatibility scan', () => {
 			'type,name,slug,version,active,status,reason,php,file,line,severity,message'
 		);
 		expect( rows ).toContain(
-			'plugin,Problem Plugin,problem-plugin,2.0.0,yes,problems,,7.2,includes/legacy.php,42,ERROR,Example problem on PHP 7.2'
+			'plugin,Problem Plugin,problem-plugin,2.0.0,yes,problems,,8.0,includes/legacy.php,42,ERROR,Example problem on PHP 8.0'
 		);
 
 		const json = JSON.parse( ( await download( 'json' ) ).text );
 		expect( json.summary ).toEqual( {
-			passes: 2,
+			passes: 3,
 			problems: 1,
-			not_checked: 2,
+			not_checked: 1,
 			failed: 0,
 		} );
 		const problem = json.items.find( ( i ) => 'problem-plugin' === i.slug );
-		expect( problem.php[ '7.0' ] ).toBe( 'not_counted' );
-		expect( problem.php[ '7.2' ] ).toBe( 'fail' );
+		expect( problem.php[ '7.4' ] ).toBe( 'not_counted' );
+		expect( problem.php[ '8.0' ] ).toBe( 'fail' );
 
 		// PDF is the default format: a tagged PDF, downloaded in one click.
 		const pdf = await download( 'pdf' );
@@ -356,7 +378,7 @@ test.describe( 'PHP Compatibility scan', () => {
 		page,
 		requestUtils,
 	} ) => {
-		await mockTide( page );
+		await mockScanner( page );
 		await admin.visitAdminPage( ...PAGE );
 		await expect( page.locator( '.wpe-pcc-aside' ) ).toHaveCount( 0 );
 

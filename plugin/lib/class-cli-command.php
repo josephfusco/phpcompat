@@ -13,9 +13,9 @@ use WP_CLI\Utils;
 /**
  * Check plugins and themes for PHP compatibility.
  *
- * Results come from Tide (wptide.org), which audits plugins and themes on
- * WordPress.org with PHPCompatibilityWP. Items that aren't on WordPress.org
- * can't be checked.
+ * Scans the installed files with PHPCompatibilityWP, the same scanner the
+ * Tools > PHP Compatibility page runs in the browser, for PHP 7.4 to 8.5.
+ * Works for every plugin and theme, including premium and custom code.
  *
  * ## EXAMPLES
  *
@@ -51,14 +51,11 @@ class CLI_Command {
 	 * [--active]
 	 * : Only scan active plugins and themes.
 	 *
-	 * [--wait=<seconds>]
-	 * : How long to keep retrying items Tide is still auditing.
-	 * ---
-	 * default: 60
-	 * ---
+	 * [--cached]
+	 * : Use stored results (from the scan page or an earlier run) instead of scanning. Items without one are "not_scanned".
 	 *
 	 * [--fields=<fields>]
-	 * : Fields to show. Available: type, slug, name, version, active, requires_php, status, failing_versions, reason, max_php_checked.
+	 * : Fields to show. Available: type, slug, name, version, active, requires_php, source, status, failing_versions, reason, max_php_checked, scanned_at.
 	 * ---
 	 * default: name,type,version,status,failing_versions,reason
 	 * ---
@@ -82,9 +79,9 @@ class CLI_Command {
 	 *     | name              | type   | version | status   | failing_versions | reason |
 	 *     +-------------------+--------+---------+----------+------------------+--------+
 	 *     | Classic Editor    | plugin | 1.7.0   | passes   |                  |        |
-	 *     | WP-Optimize       | plugin | 4.7.0   | problems | 7.2, 7.3         |        |
+	 *     | WP-Optimize       | plugin | 4.7.0   | problems | 7.4              |        |
 	 *     +-------------------+--------+---------+----------+------------------+--------+
-	 *     Success: 1 passes, 1 has problems. Results cover PHP up to 8.0.
+	 *     Success: 1 passes, 1 has problems. Results cover PHP up to 8.5.
 	 *
 	 * @param array $args       Slugs.
 	 * @param array $assoc_args Options.
@@ -103,10 +100,20 @@ class CLI_Command {
 			WP_CLI::error( 'No matching plugins or themes.' );
 		}
 
-		$scan = $this->scan_with_retries( $scanner, $items, (int) Utils\get_flag_value( $assoc_args, 'wait', 60 ) );
-		$rows = array_map( array( $this, 'row' ), $scan['items'] );
-
 		$format = Utils\get_flag_value( $assoc_args, 'format', 'table' );
+		$cached = (bool) Utils\get_flag_value( $assoc_args, 'cached', false );
+		$scan   = $scanner->scan(
+			$items,
+			false,
+			$cached ? Scanner::MODE_STORED : Scanner::MODE_LIVE,
+			static function ( $item ) use ( $cached, $format ) {
+				// Progress on stderr keeps json/csv output clean.
+				if ( ! $cached && 'count' !== $format ) {
+					fwrite( STDERR, sprintf( "Scanning %s %s...\n", $item['name'], $item['version'] ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+				}
+			}
+		);
+		$rows   = array_map( array( $this, 'row' ), $scan['items'] );
 		$fields = Utils\get_flag_value( $assoc_args, 'fields', 'name,type,version,status,failing_versions,reason' );
 		Utils\format_items( $format, $rows, $fields );
 
@@ -154,7 +161,7 @@ class CLI_Command {
 	 *
 	 * ## EXAMPLES
 	 *
-	 *     $ wp php-compat report wp-optimize --php=7.3
+	 *     $ wp php-compat report wp-optimize --php=7.4
 	 *
 	 * @param array $args       Slug.
 	 * @param array $assoc_args Options.
@@ -172,7 +179,12 @@ class CLI_Command {
 			WP_CLI::error( sprintf( 'No plugin or theme with the slug "%s".', $args[0] ) );
 		}
 
+		// The stored result if there is one for this version; otherwise scan now.
 		$result = $scanner->scan_item( $items[0], true );
+		if ( 'not_scanned' === $result['status'] ) {
+			WP_CLI::log( sprintf( 'Scanning %s %s...', $items[0]['name'], $items[0]['version'] ) );
+			$result = $scanner->scan_item( $items[0], true, Scanner::MODE_LIVE );
+		}
 		$format = Utils\get_flag_value( $assoc_args, 'format', 'table' );
 		$php    = Utils\get_flag_value( $assoc_args, 'php', '' );
 
@@ -235,6 +247,18 @@ class CLI_Command {
 			$status['latest_is_security']   = $release['latest_is_security'];
 			$status['security_support_end'] = $release['security_support_end'];
 			$status['release_message']      = $release['message'];
+			foreach ( $release['advisories'] as $advisory ) {
+				$label = Php_Releases::label( $advisory );
+				if ( ! empty( $advisory['conditions'] ) ) {
+					$status[ 'advisory: ' . $advisory['id'] ] = $label . ' — ' . $advisory['mitigation'];
+				} else {
+					$status[ 'advisory: ' . $advisory['id'] ] = $advisory['fixed_in']
+						/* translators: 1: vulnerability name and CVE IDs, 2: fixed PHP version. */
+						? sprintf( __( '%1$s — fixed in %2$s', 'php-compatibility-checker' ), $label, $advisory['fixed_in'] )
+						/* translators: %s: vulnerability name and CVE IDs. */
+						: sprintf( __( '%s — no official fix for this version', 'php-compatibility-checker' ), $label );
+				}
+			}
 
 			$rows = array();
 			foreach ( $status as $key => $value ) {
@@ -248,27 +272,6 @@ class CLI_Command {
 		}
 
 		WP_CLI::print_value( $status, array( 'format' => $format ) );
-	}
-
-	/**
-	 * Scan, retrying items Tide is still auditing until they finish or time runs out.
-	 *
-	 * @param Scanner $scanner Scanner.
-	 * @param array[] $items   Items.
-	 * @param int     $wait    Seconds to keep retrying.
-	 * @return array Scan results.
-	 */
-	private function scan_with_retries( $scanner, $items, $wait ) {
-		$deadline = time() + max( 0, $wait );
-		$scan     = $scanner->scan( $items );
-
-		while ( $scan['summary']['pending'] > 0 && time() < $deadline ) {
-			WP_CLI::log( sprintf( 'Waiting for Tide to finish auditing %d item(s)...', $scan['summary']['pending'] ) );
-			sleep( 5 );
-			$scan = $scanner->scan( $items );
-		}
-
-		return $scan;
 	}
 
 	/**
@@ -297,7 +300,7 @@ class CLI_Command {
 			'passes'      => '%d passes',
 			'problems'    => '%d %s problems',
 			'not_checked' => '%d not checked',
-			'pending'     => '%d still being audited',
+			'not_scanned' => '%d not scanned yet',
 			'failed'      => '%d failed to scan',
 		);
 

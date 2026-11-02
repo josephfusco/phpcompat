@@ -25,7 +25,6 @@ const COLOR = {
 	surface: '#f6f7f7',
 	blueberry: '#3858e9',
 	link: '#2145e6',
-	tint: '#c7d0ff',
 	white: '#ffffff',
 	error: '#cc1818',
 	warning: '#b26200',
@@ -85,9 +84,23 @@ function isCp1252( value ) {
  * @return {boolean} Needs the fallback.
  */
 export function needsUnicodeFallback( items, meta ) {
+	let date = '';
+	try {
+		date = new Date( meta.generated_at ).toLocaleString( pageLang(), {
+			month: 'long',
+			timeZoneName: 'short',
+		} );
+	} catch {}
+
 	const strings = [
 		meta.site?.name,
 		meta.site?.url,
+		// The report's own labels, in the admin's language, and its date.
+		__( 'PHP Compatibility Report', 'php-compatibility-checker' ),
+		__( 'Needs attention', 'php-compatibility-checker' ),
+		__( 'About this report', 'php-compatibility-checker' ),
+		__( 'With problems', 'php-compatibility-checker' ),
+		date,
 		...items.flatMap( ( item ) => [
 			item.name,
 			item.version,
@@ -335,8 +348,6 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 	const byStatus = ( status ) =>
 		sorted.filter( ( item ) => status === item.status );
 	const problemItems = byStatus( 'problems' );
-	const unchecked = [ ...byStatus( 'failed' ), ...byStatus( 'not_checked' ) ];
-	const passing = byStatus( 'passes' );
 	const inactive = ( item ) =>
 		item.active
 			? ''
@@ -360,9 +371,13 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 				meta.max_php_checked
 			);
 		}
-		return __(
-			'Not on WordPress.org (premium, custom, or modified), so it cannot be checked.',
-			'php-compatibility-checker'
+		// The scan's own explanation (e.g. no PHP files), when it gave one.
+		return (
+			item.reason ||
+			__(
+				'Not on WordPress.org (premium, custom, or modified).',
+				'php-compatibility-checker'
+			)
 		);
 	};
 	const statusLabel = {
@@ -399,32 +414,22 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 	// Header band (decoration) with the title and site name (content).
 	const top = section();
 	artifact( () => {
-		doc.rect( 0, 0, W, 108 ).fill( COLOR.charcoal );
-		doc.rect( 0, 108, W, 3 ).fill( COLOR.blueberry );
+		doc.rect( 0, 0, W, 92 ).fill( COLOR.charcoal );
+		doc.rect( 0, 92, W, 3 ).fill( COLOR.blueberry );
 	} );
-	font( 8, 'bold', COLOR.tint );
-	text(
-		top,
-		'P',
-		__( 'PHP COMPATIBILITY CHECKER', 'php-compatibility-checker' ),
-		{
-			y: 30,
-			text: { characterSpacing: 1.2 },
-		}
-	);
 	font( 22, 'bold', COLOR.white );
 	text(
 		top,
 		'H1',
 		__( 'PHP Compatibility Report', 'php-compatibility-checker' ),
 		{
-			y: 48,
+			y: 30,
 		}
 	);
 	font( 10.5, 'normal', COLOR.grayLight );
-	text( top, 'P', site.name || site.url, { y: 80 } );
+	text( top, 'P', site.name || site.url, { y: 62 } );
 	doc.outline.addItem( __( 'Summary', 'php-compatibility-checker' ) );
-	doc.y = 136;
+	doc.y = 120;
 
 	// Facts in two columns.
 	const scope =
@@ -610,12 +615,12 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 			if ( 'problems' === item.status ) {
 				const fails = sprintf(
 					/* translators: %s: PHP versions. */
-					__( 'Fails on %s', 'php-compatibility-checker' ),
+					__( 'On PHP %s', 'php-compatibility-checker' ),
 					versionsWith( item, 'fail' ).join( ', ' )
 				);
 				return item.update_version
 					? sprintf(
-							/* translators: 1: "Fails on 7.4, 8.0", 2: version number. */
+							/* translators: 1: "On PHP 7.4, 8.0", 2: version number. */
 							__(
 								'%1$s; update to %2$s available',
 								'php-compatibility-checker'
@@ -628,7 +633,7 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 			if ( 'passes' === item.status ) {
 				return sprintf(
 					/* translators: %s: PHP versions. */
-					__( 'Passes on %s', 'php-compatibility-checker' ),
+					__( 'On PHP %s', 'php-compatibility-checker' ),
 					versionsWith( item, 'pass' ).join( ', ' )
 				);
 			}
@@ -641,7 +646,7 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 				__( 'Type', 'php-compatibility-checker' ),
 				__( 'Version', 'php-compatibility-checker' ),
 				__( 'Status', 'php-compatibility-checker' ),
-				__( 'PHP results', 'php-compatibility-checker' ),
+				__( 'Details', 'php-compatibility-checker' ),
 			],
 			sorted.map( ( item ) => [
 				item.name + inactive( item ),
@@ -799,28 +804,36 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 				);
 				doc.moveDown( 0.3 );
 				const grouped = groupByMessage( file.rows );
+				// Only show versions per row when they differ from the item's.
+				const fails = versionsWith( item, 'fail' ).join( ', ' );
+				const showPhp = grouped.some(
+					( row ) => row.versions.join( ', ' ) !== fails
+				);
+				const phpW = showPhp ? 56 : 0;
 				table(
 					itemSect,
 					[
 						__( 'Type', 'php-compatibility-checker' ),
 						__( 'Problem', 'php-compatibility-checker' ),
 						__( 'Lines', 'php-compatibility-checker' ),
-						__( 'PHP', 'php-compatibility-checker' ),
-					],
-					grouped.map( ( row ) => [
-						'WARNING' === row.type
-							? __( 'Warning', 'php-compatibility-checker' )
-							: __( 'Error', 'php-compatibility-checker' ),
-						row.message,
-						row.lines.join( ', ' ),
-						row.versions.join( ', ' ),
-					] ),
+						showPhp && __( 'PHP', 'php-compatibility-checker' ),
+					].filter( Boolean ),
+					grouped.map( ( row ) =>
+						[
+							'WARNING' === row.type
+								? __( 'Warning', 'php-compatibility-checker' )
+								: __( 'Error', 'php-compatibility-checker' ),
+							row.message,
+							row.lines.join( ', ' ),
+							showPhp && row.versions.join( ', ' ),
+						].filter( ( cell ) => false !== cell )
+					),
 					[
 						{ width: 52 },
-						{ width: contentW - 52 - 100 - 56 },
+						{ width: contentW - 52 - 100 - phpW },
 						{ width: 100 },
-						{ width: 56 },
-					],
+						showPhp && { width: phpW },
+					].filter( Boolean ),
 					( rowIndex, colIndex ) =>
 						0 === colIndex
 							? {
@@ -836,102 +849,12 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 		} );
 	}
 
-	// Not checked.
-	if ( unchecked.length ) {
-		const sect = section();
-		ensure( 120 );
-		doc.outline.addItem( __( 'Not checked', 'php-compatibility-checker' ) );
-		heading(
-			sect,
-			sprintf(
-				/* translators: %d: number of plugins and themes. */
-				__( 'Not checked (%d)', 'php-compatibility-checker' ),
-				unchecked.length
-			),
-			2
-		);
-		table(
-			sect,
-			[
-				__( 'Name', 'php-compatibility-checker' ),
-				__( 'Version', 'php-compatibility-checker' ),
-				__( 'Type', 'php-compatibility-checker' ),
-				__( 'Reason', 'php-compatibility-checker' ),
-			],
-			unchecked.map( ( item ) => [
-				item.name + inactive( item ),
-				item.version,
-				typeLabel( item ),
-				reasonFor( item ),
-			] ),
-			[
-				{ width: contentW * 0.27 },
-				{ width: contentW * 0.1 },
-				{ width: contentW * 0.1 },
-				{ width: contentW * 0.53 },
-			],
-			( rowIndex, colIndex ) =>
-				0 === colIndex
-					? {
-							type: 'TH',
-							scope: 'Row',
-							font: { src: 'Helvetica-Bold', size: 9 },
-						}
-					: {}
-		);
-	}
-
-	// Passes.
-	if ( passing.length ) {
-		const sect = section();
-		ensure( 120 );
-		doc.outline.addItem( __( 'Passes', 'php-compatibility-checker' ) );
-		heading(
-			sect,
-			sprintf(
-				/* translators: %d: number of plugins and themes. */
-				__( 'Passes (%d)', 'php-compatibility-checker' ),
-				passing.length
-			),
-			2
-		);
-		table(
-			sect,
-			[
-				__( 'Name', 'php-compatibility-checker' ),
-				__( 'Version', 'php-compatibility-checker' ),
-				__( 'Type', 'php-compatibility-checker' ),
-				__( 'Passes on PHP', 'php-compatibility-checker' ),
-			],
-			passing.map( ( item ) => [
-				item.name + inactive( item ),
-				item.version,
-				typeLabel( item ),
-				versionsWith( item, 'pass' ).join( ', ' ),
-			] ),
-			[
-				{ width: contentW * 0.4 },
-				{ width: contentW * 0.12 },
-				{ width: contentW * 0.12 },
-				{ width: contentW * 0.36 },
-			],
-			( rowIndex, colIndex ) =>
-				0 === colIndex
-					? {
-							type: 'TH',
-							scope: 'Row',
-							font: { src: 'Helvetica-Bold', size: 9 },
-						}
-					: {}
-		);
-	}
-
 	// About this report.
 	{
 		const sect = section();
 		const about = [
 			__(
-				'Results are static analysis by PHPCompatibilityWP, run by WP Tide on the versions published on WordPress.org. Your code is not executed, so runtime issues cannot be detected, and plugins and themes that are not on WordPress.org cannot be checked.',
+				'Results are static analysis by PHPCompatibilityWP, run in the browser on WordPress Playground. Plugins and themes from WordPress.org are checked as published there; premium, custom, and modified code is checked as installed on this site. Code is not executed, so runtime issues cannot be detected.',
 				'php-compatibility-checker'
 			),
 			__(
@@ -961,13 +884,13 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 		font( 9.5, 'normal', COLOR.link );
 		doc.text(
 			clean(
-				__( 'About WP Tide (wptide.org)', 'php-compatibility-checker' )
+				__( 'About PHPCompatibilityWP', 'php-compatibility-checker' )
 			),
 			MARGIN,
 			doc.y,
 			{
 				width: contentW,
-				link: 'https://wptide.org/',
+				link: 'https://github.com/PHPCompatibility/PHPCompatibilityWP',
 				underline: true,
 				continued: problemItems.length > 0,
 			}
@@ -993,6 +916,35 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 		doc.endMarkedContent();
 		para.add( content );
 		para.end();
+
+		// Attribution: who makes the tool.
+		doc.moveDown( 1.2 );
+		const credit = doc.struct( 'P' );
+		sect.add( credit );
+		const creditContent = doc.markStructureContent( 'P' );
+		font( 9, 'normal', COLOR.gray );
+		doc.text(
+			clean(
+				__(
+					'PHP Compatibility Checker is made by',
+					'php-compatibility-checker'
+				)
+			) + ' ',
+			MARGIN,
+			doc.y,
+			{ width: contentW, continued: true }
+		);
+		font( 9, 'normal', COLOR.link );
+		doc.text( 'WP Engine', {
+			link: site.maker_url || 'https://wpengine.com/',
+			underline: true,
+			continued: true,
+		} );
+		font( 9, 'normal', COLOR.gray );
+		doc.text( '.', { link: null, underline: false } );
+		doc.endMarkedContent();
+		credit.add( creditContent );
+		credit.end();
 	}
 
 	root.end();
@@ -1002,13 +954,13 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 		? sprintf(
 				/* translators: %s: plugin version number. */
 				__(
-					'Generated by PHP Compatibility Checker %s',
+					'Generated by PHP Compatibility Checker %s by WP Engine',
 					'php-compatibility-checker'
 				),
 				site.plugin_version
 			)
 		: __(
-				'Generated by PHP Compatibility Checker',
+				'Generated by PHP Compatibility Checker by WP Engine',
 				'php-compatibility-checker'
 			);
 	const range = doc.bufferedPageRange();

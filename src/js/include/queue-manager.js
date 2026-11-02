@@ -7,11 +7,13 @@ import {
 import $ from 'jquery';
 import { hideDownload, showDownload } from './download';
 import { __, sprintf } from '@wordpress/i18n';
-
-// Tide audits new versions on demand. Poll every 5 seconds for up to 2 minutes,
-// then report the item as still pending instead of spinning forever.
-const RETRY_DELAY = 5000;
-const MAX_ATTEMPTS = 24;
+import {
+	scanItem,
+	saveResult,
+	stopEngine,
+	getEngine,
+	ScanError,
+} from './scanner';
 
 const progress = $( '.wpe-pcc-progress' );
 const progressCount = $( '.wpe-pcc-progress-count' );
@@ -24,16 +26,18 @@ const progressCount = $( '.wpe-pcc-progress-count' );
  * @param {string} mode        "yes" (active only), "no" (all), or "choose".
  */
 export function initQueue( itemsToScan, mode ) {
-	// Reset the queue.
+	// Reset the queue. A new scan ID makes any scan still running ignore its results.
 	window.phpcompat.queue = [];
 	window.phpcompat.results = [];
 	window.phpcompat.report = [];
 	window.phpcompat.total = 0;
 	window.phpcompat.completed = 0;
+	window.phpcompat.scanId = ( window.phpcompat.scanId || 0 ) + 1;
 
-	clearTimeout( window.phpcompat.ticker );
-	if ( window.phpcompat.xhr ) {
-		window.phpcompat.xhr.abort();
+	if ( window.phpcompat.running ) {
+		// Stop the PHP runtime mid-scan; the next scan starts a fresh one.
+		stopEngine();
+		window.phpcompat.running = false;
 	}
 
 	hideDownload();
@@ -67,130 +71,74 @@ export function limitQueue( ids ) {
 	window.phpcompat.total = window.phpcompat.queue.length;
 }
 
-export function executeJob( job, cb ) {
-	const endpoint = `https://wptide.org/api/v1/audit/wporg/${ job.type }/${ encodeURIComponent( job.slug ) }/${ encodeURIComponent( job.version ) }?reports=phpcs_phpcompatibilitywp`;
+/**
+ * Scan one item, or reuse its stored result.
+ *
+ * Results for code from WordPress.org are reused when the same version was
+ * already scanned with the same rules: that code can't change. Code read from
+ * this site can change without a new version number, so it's always scanned.
+ *
+ * @param {Object}     job Queued item.
+ * @param {() => void} cb  Called when done (not called if the scan was reset).
+ */
+export async function executeJob( job, cb ) {
+	const scanId = window.phpcompat.scanId;
+	const current = () => scanId === window.phpcompat.scanId;
 
-	// Only allow 1 concurrent request at a time
-	if (
-		false === window.phpcompat.xhr ||
-		[ 0, 4 ].includes( window.phpcompat.xhr.readyState )
-	) {
-		window.phpcompat.xhr = $.ajax( endpoint, {
-			dataType: 'json',
-			timeout: 30000,
-			beforeSend: () => {
-				if ( ! job.attempts ) {
-					setItemStatus(
-						job,
-						__( 'Scanning…', 'php-compatibility-checker' ),
-						true
-					);
-				}
-			},
-		} )
-			.done( ( response ) => {
-				if ( 'complete' === response.status ) {
-					window.phpcompat.results.push( { ...job, ...response } );
-					updateResult( response, job );
-					updateProgress();
-				} else if ( 'pending' === response.status ) {
-					job.attempts = ( job.attempts || 1 ) + 1;
+	if ( job.stored && 'wporg' === job.stored.source ) {
+		window.phpcompat.results.push( job );
+		updateResult( job.stored.report, job );
+		updateProgress();
+		cb();
+		return;
+	}
 
-					if ( job.attempts > MAX_ATTEMPTS ) {
-						updateProgress();
-						updateResultFailure(
-							{
-								status: 'skipped',
-								message: sprintf(
-									/* translators: 1: plugin or theme name, 2: version number. */
-									__(
-										'Tide is still auditing %1$s %2$s. Scan it again in a few minutes.',
-										'php-compatibility-checker'
-									),
-									job.name,
-									job.version
-								),
-							},
-							job
-						);
-					} else {
-						showWaiting( job );
-						job.retryAt = new Date(
-							new Date().getTime() + RETRY_DELAY
-						);
-						window.phpcompat.queue.push( job );
-					}
-				} else {
-					updateProgress();
-					// Unexpected behaviour. Stop scanning and display current status.
-					updateResultFailure( response, job );
-				}
-			} )
-			.fail( ( jqXHR, textStatus ) => {
-				// Aborted by "Start over": the scan was reset, so leave the
-				// new scan's progress and results alone.
-				if ( 'abort' === textStatus ) {
-					return;
-				}
+	setItemStatus( job, __( 'Scanning…', 'php-compatibility-checker' ), true );
+	window.phpcompat.running = true;
 
-				updateProgress();
-
-				if ( 'timeout' === textStatus ) {
-					updateResultFailure(
-						{
-							status: 'failed',
-							message: __(
-								'WP Tide took too long to respond. Please scan again.',
-								'php-compatibility-checker'
-							),
-						},
-						job
-					);
-				} else if ( 0 === jqXHR.status ) {
-					// No HTTP response: offline, or the request was blocked
-					// (firewall, proxy, or browser extension).
-					updateResultFailure(
-						{
-							status: 'failed',
-							message: __(
-								'Could not connect to WP Tide (wptide.org). Check your internet connection, and that a firewall or browser extension is not blocking it, then scan again.',
-								'php-compatibility-checker'
-							),
-						},
-						job
-					);
-				} else if ( 404 === jqXHR.status ) {
-					// Tide only audits plugins and themes hosted on WordPress.org.
-					updateResultFailure(
-						{
-							status: 'skipped',
-							message: sprintf(
-								/* translators: 1: plugin or theme name, 2: version number. */
+	try {
+		const { report, source } = await scanItem( job, ( text ) => {
+			if ( current() ) {
+				setItemStatus( job, text, true );
+			}
+		} );
+		if ( ! current() ) {
+			return;
+		}
+		window.phpcompat.results.push( job );
+		updateResult( report, job );
+		updateProgress();
+		saveResult( job, report, source );
+	} catch ( error ) {
+		if ( ! current() ) {
+			return;
+		}
+		updateProgress();
+		updateResultFailure(
+			{
+				status: error instanceof ScanError ? error.status : 'failed',
+				message:
+					error instanceof ScanError
+						? error.message
+						: sprintf(
+								/* translators: %s: error message. */
 								__(
-									'%1$s %2$s could not be scanned. Only plugins and themes available on WordPress.org can be checked, so premium, custom, or modified versions are skipped.',
+									'Scan failed: %s',
 									'php-compatibility-checker'
 								),
-								job.name,
-								job.version
+								error?.message || String( error )
 							),
-						},
-						job
-					);
-				} else {
-					updateResultFailure(
-						jqXHR.responseJSON ?? {
-							status: jqXHR.status,
-							message: jqXHR.responseText,
-						},
-						job
-					);
-				}
-			} )
-			.always( ( data, textStatus ) => {
-				if ( 'abort' !== textStatus ) {
-					cb();
-				}
-			} );
+			},
+			job
+		);
+	} finally {
+		if ( current() ) {
+			window.phpcompat.running = false;
+		}
+	}
+
+	if ( current() ) {
+		cb();
 	}
 }
 
@@ -218,22 +166,6 @@ export function showPlayground() {
 	$( '.wpe-pcc-playground' ).show();
 }
 
-/**
- * Tell the user an item is waiting on Tide rather than stuck.
- *
- * @param {Object} job Queued item.
- */
-function showWaiting( job ) {
-	setItemStatus(
-		job,
-		__(
-			'Tide is auditing this version for the first time. This can take a couple of minutes.',
-			'php-compatibility-checker'
-		),
-		true
-	);
-}
-
 export function runNextJob() {
 	if ( window.phpcompat.queue.length === 0 ) {
 		resetProgress();
@@ -249,22 +181,8 @@ export function runNextJob() {
 		return;
 	}
 
-	const now = new Date();
-
-	// Pick up next job from queue.
-	const job = window.phpcompat.queue.shift();
-
-	// The job is new or the time has come.
-	if ( 'undefined' === typeof job.retryAt || job.retryAt <= now ) {
-		// Run the job now.
-		executeJob( job, () => {
-			runNextJob();
-		} );
-	} else {
-		// Or put it back to the end of queue.
-		window.phpcompat.queue.push( job );
-		window.phpcompat.ticker = setTimeout( runNextJob, 1000 );
-	}
+	// One at a time: each scan uses the same PHP runtime.
+	executeJob( window.phpcompat.queue.shift(), runNextJob );
 }
 
 export function updateProgress() {
@@ -290,10 +208,46 @@ export function startProgress() {
 	$( '.wpe-pcc-spinner' ).show();
 	progress.show();
 	showProgressCount();
+	warmUpEngine();
+}
+
+/**
+ * Start loading the PHP runtime as soon as the scan starts, while stored
+ * results are shown, if any item needs a real scan. Loading progress goes on
+ * the progress line, not on whichever item happens to wait for it.
+ */
+function warmUpEngine() {
+	const needsScan = window.phpcompat.queue.some(
+		( job ) => ! ( job.stored && 'wporg' === job.stored.source )
+	);
+	if ( ! needsScan || 'function' === typeof window.phpcompatTestScanner ) {
+		return;
+	}
+	const scanId = window.phpcompat.scanId;
+	const note = ( text ) => {
+		if ( scanId === window.phpcompat.scanId ) {
+			progressNote().text( text );
+		}
+	};
+	window.phpcompat.running = true;
+	getEngine( note ).then(
+		() => note( '' ),
+		() => note( '' )
+	);
+}
+
+function progressNote() {
+	let note = progress.find( '.wpe-pcc-progress-note' );
+	if ( ! note.length ) {
+		note = $( '<span class="wpe-pcc-progress-note"></span>' );
+		progressCount.after( note );
+	}
+	return note;
 }
 
 function resetProgress() {
 	$( '.wpe-pcc-spinner' ).hide();
 	progressCount.text( '' );
+	progress.find( '.wpe-pcc-progress-note' ).remove();
 	progress.hide();
 }

@@ -22,6 +22,14 @@ updates:
         dependency-type: development
         update-types: [minor, patch]
 
+  # The scanner that ships in the plugin (phpcs + PHPCompatibilityWP). Each
+  # update changes the rule set, so stored results are rescanned with it.
+  - package-ecosystem: composer
+    directory: /tools/phpcs-bundle
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

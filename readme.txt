@@ -1,7 +1,8 @@
 === PHP Compatibility Checker ===
 Contributors:      wpengine, octalmage, stevenkword, Taylor4484, pross, jcross, rfmeier, cadic, dkotter, ankit-k-gupta, jeffpaul
-Tags:              php 7, php 8, php, version, compat, compatibility, checker, wp engine, wpe, wpengine
-Requires at least: 5.6
+Tags:              php 8, php, compatibility, phpcompatibility, upgrade
+Requires at least: 6.4
+Requires PHP:      7.4
 Tested up to:      7.2
 Stable tag:        1.6.4
 License:           GPLv2 or later
@@ -13,18 +14,21 @@ Make sure your plugins and themes are compatible with newer PHP versions.
 
 The WP Engine PHP Compatibility Checker can be used by any WordPress website on any web host to check PHP version compatibility.
 
-This plugin will lint theme and plugin code installed on your WordPress site and give you back a report of compatibility issues as reported by [Tide](https://wptide.org) for you to fix. Compatibility issues are categorized into errors and warnings and will list the file and line number of the offending code, as well as the info about why that line of code is incompatible with the chosen version of PHP. The plugin will also suggest updates to themes and plugins, as a new version may offer compatible code.
+It checks your plugins and themes with [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), the PHP community's standard compatibility checker for [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), using its WordPress ruleset, [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP). Each problem lists the file and line of the code and why it breaks on that version of PHP. Problems are categorized into errors (the code breaks) and warnings (deprecated, but still runs). The plugin also suggests updates to themes and plugins, as a new version may offer compatible code.
+
+**The scan runs in your browser, not on your server.** PHP runs in the browser through [WordPress Playground](https://wordpress.org/playground/), so scanning doesn't slow down your site or time out on shared hosting. Plugins and themes from WordPress.org are downloaded from there; premium, custom, and modified code is read from your site in small batches.
 
 **This plugin does not execute your theme and plugin code, as such this plugin cannot detect runtime compatibility issues.**
 
 **Please note that linting code is not perfect. This plugin cannot detect unused code-paths that might be used for backwards compatibility, and thus might show false positives.**
 
-**This plugin relies on [Tide](https://wptide.org) that constantly scans updated versions of plugins and themes in the background. Your scan results should be near real-time, but if not that just means Tide has not yet scanned your specific plugin or theme version. Please be patient as this may take up to 10 minutes for results to be returned from Tide. Please see the [FAQ](https://wordpress.org/plugins/php-compatibility-checker/faq/) for more information.**
-
 = What gets checked =
 
-* Results cover PHP versions up to PHP 8.0, which is the newest version Tide currently reports on.
-* Only plugins and themes available on WordPress.org can be checked. Premium, custom, or modified plugins and themes are skipped and marked as not scannable.
+* Every plugin and theme you choose: from WordPress.org, premium, custom, or modified.
+* PHP 7.4, 8.0, 8.1, 8.2, 8.3, 8.4, and 8.5, each on its own. PHP versions below a plugin's or theme's own "Requires PHP" are not counted.
+* Your server's PHP: whether it's the latest release of a branch that still gets security fixes, and whether it's affected by a critical vulnerability such as PHP2Shell (CVE-2026-109618, CVE-2026-109619).
+
+Reports download as PDF (tagged for screen readers), text, CSV, or JSON. WP-CLI commands and the Abilities API give the same results to scripts, hosts, and AI agents.
 
 = Disclaimer =
 *While this plugin is written to detect as many problems as accurately as possible, 100% reliable detection is very difficult to ensure. It is best practice to run comprehensive tests before you migrate to a new PHP version.*
@@ -41,7 +45,7 @@ To manually install:
 1. Upload the `php-compatibility-checker` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
 
-Go to `Tools => PHP Compatibility`, leave everything selected (or untick what you want to skip), and click `Scan`. Most results come back within seconds. The scan runs in your browser, so keep the page open until it finishes.
+Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. The first scan loads the scanner (about 8 MB, then cached by your browser); most plugins take a few seconds each after that. The scan runs in your browser, so keep the page open until it finishes.
 
 == Frequently Asked Questions ==
 
@@ -51,25 +55,23 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 
 = 2. Are there WP-CLI commands available? =
 
-    Yes. Run `wp php-compat scan` to check every plugin and theme (add `--active` for active ones only, or `--format=json`). It exits with status 1 when problems are found, so it works in scripts and CI. `wp php-compat report <slug>` shows the details, and `wp php-compat php-status` shows the server's PHP status. Run `wp help php-compat` for all options.
+    Yes. Run `wp php-compat scan` to check every plugin and theme (add `--active` for active ones only, or `--format=json`). WP-CLI scans the installed files directly on your server, with the same scanner the scan page uses. It exits with status 1 when problems are found, so it works in scripts and CI. `wp php-compat report <slug>` shows the details, and `wp php-compat php-status` shows the server's PHP status. Run `wp help php-compat` for all options.
 
 = 3. A plugin I created is listed as not compatible, what should I do? =
 
-    Results come from [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), a static code checker, as run by [Tide](https://wptide.org). It can flag code that never runs on newer PHP, such as backwards compatibility fallbacks. If you think a result is wrong, please open a [GitHub issue](https://github.com/wpengine/phpcompat/issues) with the plugin, version, and the reported line.
+    Results come from [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), a static code checker. It can flag code that never runs on newer PHP, such as backwards compatibility fallbacks. Every report lists the exact PHPCompatibility version used. If you think a result is wrong, check it against PHPCompatibility's [issue tracker](https://github.com/PHPCompatibility/PHPCompatibility/issues), or open a [GitHub issue](https://github.com/wpengine/phpcompat/issues) here with the plugin, version, and the reported line.
 
 = 4. Can I use this to test non-WordPress PHP Projects? =
 
     Yes! While you cannot use this WordPress plugin to test your non-WordPress projects, you can use the [open source PHPCompatibility library](https://github.com/PHPCompatibility/PHPCompatibility) that this plugin is built on.
 
-= 5. Why was my plugin/theme skipped? =
+= 5. Can it check premium and custom plugins and themes? =
 
-    If your plugin or theme is not available on WordPress.org, then [Tide](https://wptide.org) will not be able to scan or return results of that plugin or theme.
-    
-    If your plugin or theme is available on WordPress.org, but Tide is not immediately returning results than it likely means Tide has not yet audited that plugin or theme and within a few minutes results should be available once Tide completes its audit.
+    Yes. Anything that isn't on WordPress.org, or whose installed version WordPress.org doesn't have, is read from your site in small batches and scanned in your browser. Your code only goes to your own browser; it isn't uploaded anywhere.
 
-= 6. The scan is stuck, what can I do? =
+= 6. The scan stopped with an error about WordPress Playground. What can I do? =
 
-    As of version 1.6.0 of this plugin, there should no longer be issues of the scan getting stuck as it no longer runs on your WordPress host server.  If you are seeing significantly slow or unresponsive results from a plugin or theme that is available on WordPress.org, then please [open an issue](https://github.com/wptide/wptide.org/issues/new/choose) with those details for the Tide team to investigate why that specific plugin or theme version is not appearing in the Tide results.
+    The scanner runs on WordPress Playground (playground.wordpress.net) and downloads plugins and themes from downloads.wordpress.org. If a firewall, browser extension, or security policy blocks either, the scan can't run. Allow both and scan again, or run `wp php-compat scan` from WP-CLI, which scans on your server instead.
 
 = 7. I found a bug, or have a suggestion, can I contribute back? =
 
@@ -81,22 +83,25 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 
 = 8. Does it check whether my server's PHP is secure? =
 
-    It checks whether the server runs the latest release of a PHP branch that still gets security fixes, using php.net's release data, and shows a notice on the scan page if not. It can't confirm builds from your host or Linux distribution, which often include security fixes under an older-looking version number, so for those it points you to your host's security notices. It can't patch PHP for you; ask your host to update.
+    It checks whether the server runs the latest release of a PHP branch that still gets security fixes, using php.net's release data, and whether the version is affected by a critical vulnerability such as PHP2Shell. The scan page shows a notice if not. It can't confirm builds from your host or Linux distribution, which often include security fixes under an older-looking version number, so for those it points you to your host's security notices. It can't patch PHP for you; ask your host to update.
 
 = 9. What external services does this plugin use? =
 
-    * [Tide](https://wptide.org) (wptide.org): scan results. The slug and version of each plugin and theme you scan are sent to Tide's API, from your browser on the scan page, or from your server for WP-CLI and Abilities API scans. See the [Tide project](https://github.com/wptide) for its terms and privacy information.
+    * [WordPress Playground](https://wordpress.org/playground/) (playground.wordpress.net): runs PHP in your browser for the scan page. Your browser loads it; the code being scanned stays in your browser. See the [WordPress.org privacy policy](https://wordpress.org/about/privacy/).
+    * [WordPress.org](https://wordpress.org) (downloads.wordpress.org): your browser downloads the plugins and themes you scan that are hosted there, by slug and version. See the [WordPress.org privacy policy](https://wordpress.org/about/privacy/).
     * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
 
 == Screenshots ==
 
-1. Main screen: compatibility checker options
-2. Compatibility results screen
+1. The scan page: scan options, results for each plugin and theme by PHP version, and report downloads.
 
 == Changelog ==
 
 = Unreleased =
-- Keep the familiar scan page from 1.6.4, with fixes: a third scan option to choose which plugins and themes to scan (#67), a Cancel link while scanning (#56), a message while Tide audits a new version instead of waiting indefinitely (#42), and clear errors when WP Tide can't be reached (offline, blocked, or timed out) instead of "Status: 0" (#231).
+- New scanner: PHPCompatibility 10 with PHPCompatibilityWP 3 runs in your browser on WordPress Playground (PHP WebAssembly), for PHP 7.4 through 8.5. Premium, custom, and modified plugins and themes are now checked too. The site's server doesn't run the scan, so it's safe on shared hosting. Results are stored on the site and reused until the plugin or theme changes.
+- Requires PHP 7.4 and WordPress 6.4.
+- Flag critical PHP vulnerabilities on the server, starting with PHP2Shell (CVE-2026-109618, CVE-2026-109619): the scan page says the server is vulnerable and which release fixes it. CVE-2026-115560's workaround is shown when the server's session settings are exposed.
+- Keep the familiar scan page from 1.6.4, with fixes: a third scan option to choose which plugins and themes to scan (#67), a Cancel link while scanning (#56), progress for each plugin and theme while it's scanned (#42), and clear errors when the scanner can't load (offline, blocked, or timed out) instead of "Status: 0" (#231).
 - Each result shows its error count, and notes when every problem is in a bundled library (vendor, third-party), which is a common source of false positives.
 - Show "Update available" on results when WordPress knows of a newer version, as the scan page has always promised to suggest updates.
 - Reports: Download Report now defaults to PDF, with Text, CSV, and JSON as options. The PDF downloads in one click and is tagged for screen readers (headings, tables with header cells, lists, document language and title, bookmarks). It opens with a summary and recommended next steps, states the scan scope, gives a recommended action for each plugin or theme with problems, and groups repeated problems by message. The text report now starts with the site, date, server PHP, WordPress version, and a summary.
@@ -104,9 +109,8 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 - Use core's wp.template() and wp.a11y.speak() instead of bundled Mustache and compare-versions.
 - Tested with WordPress 7.2 (beta 3).
 - Check whether the server's PHP is the latest release of a supported branch, using php.net's release data. The scan page shows a notice when a newer (security) release is available, when the branch no longer gets security fixes, or when the server runs a host or distribution build to verify. Also in `wp php-compat php-status` and the `php-status` ability.
-- WP-CLI commands: `wp php-compat scan` (exits 1 when problems are found), `wp php-compat report <slug>`, and `wp php-compat php-status`.
+- WP-CLI commands: `wp php-compat scan` (scans the installed files on the server; exits 1 when problems are found; `--cached` for stored results), `wp php-compat report <slug>`, and `wp php-compat php-status`.
 - Abilities API (WordPress 6.9+): `php-compatibility-checker/scan` and `php-compatibility-checker/php-status`, so AI agents and other clients can check PHP compatibility over REST or MCP. Both require an administrator.
-- Tide results are cached for server-side scans (a week for completed audits).
 - Fix the `phpcompat_plugins_to_scan` filter not running when no plugins are left to scan (for example, when this is the only plugin installed).
 - Accessibility: failing PHP versions are buttons with expanded/collapsed state, results don't rely on color alone, and closing a report returns focus to its version.
 - Respect each plugin's and theme's "Requires PHP": PHP versions below it are marked with a dash as not counted instead of as failures. Items whose minimum is newer than any PHP version with results are marked "not checked" instead of passing.
@@ -114,13 +118,12 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 - Fix "Undefined array key" warnings when updating plugins from sources other than WordPress.org.
 - Fix translations not loading: use the WordPress.org text domain (php-compatibility-checker) and stop calling load_plugin_textdomain() too early (WordPress 6.7 notice).
 - Load JavaScript translations and declare the wp-i18n and jquery script dependencies.
-- Show a clear "could not be scanned" message, with its own style, when a plugin or theme is not on WordPress.org.
 - Clarify on the scan page where results come from and which PHP versions they cover.
 - WP Engine sidebar (shown only on WP Engine-hosted sites): replace the outdated PHP 7 upgrade pitch with how to test a new PHP version safely using PHP Test Driver or a staging environment, and show the environment's current PHP version.
 - Only show the "Need help fixing these issues?" panel when a scan finds problems.
 - Remove the "Submit to Codeable" form; the Codeable endpoint no longer accepts reports.
 - Fix PHP version ordering in scan results.
-- Correct the readme: results cover PHP up to 8.0. Remove outdated install, FAQ, and whitelist information.
+- Remove outdated install, FAQ, and whitelist information from the readme.
 
 = 1.6.4 =
 - Updates are now served from WP Engine servers.
@@ -136,7 +139,7 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 - Fix issue on update where old files were included.
 
 = 1.6.0 =
-- Changed from running PHP Compatibility scans on your WordPress server to using scan data from [Tide](https://wptide.org).
+- Changed from running PHP Compatibility scans on your WordPress server to using scan data from an external service.
 - Removed `phpcompat` WP-CLI command.
 - Update dependencies.
 
@@ -248,8 +251,8 @@ Go to `Tools => PHP Compatibility`, leave everything selected (or untick what yo
 
 = 1.6.0 =
 - WordPress minimum increased from 4.8 to 5.6.
-- PHP Compatibility scans now run via [Tide](https://wptide.org) and no longer run on your host server!
-- The WP-CLI `phpcompat` command has been removed as this plugin no longer runs on your host server and relies upon Tide.
+- PHP Compatibility scans now use an external service and no longer run on your host server!
+- The WP-CLI `phpcompat` command has been removed as this plugin no longer runs on your host server.
 
 = 1.4.8 =
 - Update dependencies.

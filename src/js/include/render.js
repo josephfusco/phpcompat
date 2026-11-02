@@ -159,11 +159,15 @@ function countLabel( errors, warnings ) {
 	return parts.join( ', ' );
 }
 
-export function updateResult( response, job ) {
-	const report = response.reports?.phpcs_phpcompatibilitywp?.report;
-
-	// If we have a success response but don't have report data, show an error.
-	if ( ! report ) {
+/**
+ * Show a scan report for an item.
+ *
+ * @param {Object} report Report: compatible, incompatible (PHP versions with
+ *                        errors), and versions (version => totals, files).
+ * @param {Object} job    Item.
+ */
+export function updateResult( report, job ) {
+	if ( ! report || ! report.versions ) {
 		updateResultFailure(
 			{
 				status: 'failed',
@@ -208,17 +212,14 @@ export function updateResult( response, job ) {
 		return;
 	}
 
-	const hasProblems = phpVersions.some( ( phpVersion ) => {
-		if ( isUnsupported( phpVersion ) ) {
-			return false;
-		}
-		const totals = report.versions[ phpVersion ]?.totals || {};
-		return (
-			report.incompatible.includes( phpVersion ) ||
-			totals.errors > 0 ||
-			totals.warnings > 0
-		);
-	} );
+	// A version fails on errors. Warnings (deprecations) still run, so they're
+	// listed with the problems but don't fail a version on their own.
+	const incompatibleVersions = report.incompatible || [];
+	const hasProblems = phpVersions.some(
+		( phpVersion ) =>
+			! isUnsupported( phpVersion ) &&
+			incompatibleVersions.includes( phpVersion )
+	);
 
 	const view = {
 		...job,
@@ -245,7 +246,7 @@ export function updateResult( response, job ) {
 			return;
 		}
 
-		const incompatible = report.incompatible.includes( phpVersion );
+		const incompatible = incompatibleVersions.includes( phpVersion );
 		entryPhp[ phpVersion ] = incompatible ? 'fail' : 'pass';
 		view.php.push( { phpversion: phpVersion, id, passed: ! incompatible } );
 
@@ -288,13 +289,31 @@ export function updateResult( response, job ) {
 	} );
 
 	if ( view.has_errors ) {
-		const totals = report.versions[ view.reports[ 0 ].phpversion ].totals;
+		// The newest failing version: the one that matters when upgrading.
+		const newest = view.reports[ view.reports.length - 1 ].phpversion;
+		const totals = report.versions[ newest ].totals;
 		view.status_text = countLabel(
 			totals?.errors || 0,
 			totals?.warnings || 0
 		);
-		view.bundled_only = entryProblems.every( ( problem ) =>
-			isBundledLibrary( problem.file )
+		view.bundled_only =
+			entryProblems.length > 0 &&
+			entryProblems.every( ( problem ) =>
+				isBundledLibrary( problem.file )
+			);
+	}
+
+	// Files that weren't checked (too big, or past the file limit).
+	if ( report.skipped_count ) {
+		view.skipped_note = sprintf(
+			/* translators: %d: number of files. */
+			_n(
+				'%d file was too large to check and was skipped.',
+				'%d files were too large or too many to check and were skipped.',
+				report.skipped_count,
+				'php-compatibility-checker'
+			),
+			report.skipped_count
 		);
 	}
 

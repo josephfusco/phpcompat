@@ -87,14 +87,14 @@ class PHP_Compatibility_Checker {
 		$style_deps = wp_style_is( 'wp-theme', 'registered' ) ? array( 'wp-theme' ) : array();
 
 		wp_enqueue_style(
-			'tide-checker',
+			'phpcompat-scan',
 			plugins_url( $scan_css, __FILE__ ),
 			$style_deps,
 			$ajax_js_assets['version']
 		);
 
 		wp_register_script(
-			'tide-checker',
+			'phpcompat-scan',
 			plugins_url( $ajax_js, __FILE__ ),
 			array_merge( $ajax_js_assets['dependencies'], array( 'wp-util' ) ),
 			$ajax_js_assets['version'],
@@ -102,24 +102,26 @@ class PHP_Compatibility_Checker {
 		);
 
 		wp_localize_script(
-			'tide-checker',
+			'phpcompat-scan',
 			'checkerList',
 			array(
-				'plugins' => $this->get_plugins_to_scan(),
-				'themes'  => $this->get_themes_to_scan(),
+				'plugins' => $this->with_stored_results( $this->get_plugins_to_scan(), 'plugin' ),
+				'themes'  => $this->with_stored_results( $this->get_themes_to_scan(), 'theme' ),
+				'scanner' => Scanner_Bundle::browser_config(),
 				'site'    => array(
 					'url'            => home_url(),
 					'name'           => get_bloginfo( 'name' ),
 					'php'            => PHP_VERSION,
 					'wp'             => get_bloginfo( 'version' ),
 					'plugin_version' => WPEPHPCOMPAT_VERSION,
+					'maker_url'      => $this->add_wpe_campaign( 'https://wpengine.com/', 'php_compatibility_checker_report' ),
 				),
 			)
 		);
 
-		wp_set_script_translations( 'tide-checker', 'php-compatibility-checker' );
+		wp_set_script_translations( 'phpcompat-scan', 'php-compatibility-checker' );
 
-		wp_enqueue_script( 'tide-checker' );
+		wp_enqueue_script( 'phpcompat-scan' );
 	}
 
 	/**
@@ -200,17 +202,28 @@ class PHP_Compatibility_Checker {
 			$plugin_file = $plugin_data['plugin_file'];
 
 			$plugins[ $key ]['update_version'] = '';
+			$plugins[ $key ]['source']         = 'local';
 
+			$update = null;
 			if ( isset( $plugin_info->response[ $plugin_file ] ) ) {
-				$plugins[ $key ]['slug'] = $plugin_info->response[ $plugin_file ]->slug;
+				$update = $plugin_info->response[ $plugin_file ];
 				// WordPress already knows a newer version exists; suggest it.
-				if ( ! empty( $plugin_info->response[ $plugin_file ]->new_version ) ) {
-					$plugins[ $key ]['update_version'] = $plugin_info->response[ $plugin_file ]->new_version;
+				if ( ! empty( $update->new_version ) ) {
+					$plugins[ $key ]['update_version'] = $update->new_version;
 				}
 			} elseif ( isset( $plugin_info->no_update[ $plugin_file ] ) ) {
-				$plugins[ $key ]['slug'] = $plugin_info->no_update[ $plugin_file ]->slug;
+				$update = $plugin_info->no_update[ $plugin_file ];
+			}
+
+			if ( $update && ! empty( $update->slug ) ) {
+				$plugins[ $key ]['slug'] = $update->slug;
+				// Premium updaters add entries too; only "w.org/" IDs are WordPress.org.
+				if ( isset( $update->id ) && 0 === strpos( (string) $update->id, 'w.org/' ) ) {
+					$plugins[ $key ]['source'] = 'wporg';
+				}
 			} else {
-				$plugins[ $key ]['slug'] = dirname( $plugin_file );
+				// One-file plugins (e.g. my-tweaks.php) have no folder: use the file name.
+				$plugins[ $key ]['slug'] = false === strpos( $plugin_file, '/' ) ? basename( $plugin_file, '.php' ) : dirname( $plugin_file );
 			}
 		}
 
@@ -224,6 +237,8 @@ class PHP_Compatibility_Checker {
 					'active'         => $plugin['active'],
 					'requires_php'   => self::sanitize_php_version( isset( $plugin['RequiresPHP'] ) ? $plugin['RequiresPHP'] : '' ),
 					'update_version' => sanitize_text_field( $plugin['update_version'] ),
+					'source'         => $plugin['source'],
+					'file'           => $plugin['plugin_file'],
 				);
 			},
 			$plugins
@@ -241,6 +256,8 @@ class PHP_Compatibility_Checker {
 		 *     @type string $active Whether the plugin is active (yes or no).
 		 *     @type string $requires_php Minimum PHP version from the plugin's "Requires PHP" header, or empty.
 		 *     @type string $update_version Newer version available from WordPress updates, or empty.
+		 *     @type string $source "wporg" if WordPress.org hosts it, otherwise "local".
+		 *     @type string $file Plugin file relative to the plugins directory.
 		 * }
 		 *
 		 * @since 1.6.0
@@ -290,6 +307,8 @@ class PHP_Compatibility_Checker {
 				'active'         => $stylesheet === $current ? 'yes' : 'no',
 				'requires_php'   => self::sanitize_php_version( $theme->get( 'RequiresPHP' ) ),
 				'update_version' => isset( $updates->response[ $stylesheet ]['new_version'] ) ? sanitize_text_field( $updates->response[ $stylesheet ]['new_version'] ) : '',
+				'source'         => self::is_wporg_theme( $updates, $stylesheet ) ? 'wporg' : 'local',
+				'file'           => (string) $stylesheet,
 			);
 		}
 
@@ -359,9 +378,11 @@ class PHP_Compatibility_Checker {
 				<p>
 					<?php
 					printf(
-						/* translators: %s: Tide URL */
-						wp_kses_post( __( 'This tool checks your plugins and themes for PHP compatibility issues using results from <a target="_blank" href="%s">WP Tide</a>, which audits code on WordPress.org with PHPCompatibility. Issues are categorized into errors and warnings, with the file and line number of the code and why it is incompatible with that version of PHP. Results cover PHP 5.6 through 8.0, and only plugins and themes available on WordPress.org can be checked. If something fails, check for an update first: a newer version may already be compatible.', 'php-compatibility-checker' ) ),
-						esc_url( 'https://wptide.org/' )
+						/* translators: 1: PHPCompatibility URL, 2: list of PHP versions, 3: WordPress Playground URL. */
+						wp_kses_post( __( 'This tool checks your plugins and themes with <a target="_blank" href="%1$s">PHPCompatibility</a> against PHP %2$s. Each problem shows the file, line, and why it breaks on that PHP version. The check runs in your browser on <a target="_blank" href="%3$s">WordPress Playground</a>, so it doesn\'t slow down your site: code from WordPress.org is downloaded from there, and premium or custom code is read from this site. If something fails, check for an update first: a newer version may already be compatible.', 'php-compatibility-checker' ) ),
+						esc_url( 'https://github.com/PHPCompatibility/PHPCompatibilityWP' ),
+						esc_html( implode( ', ', Scanner_Bundle::PHP_VERSIONS ) ),
+						esc_url( 'https://wordpress.org/playground/' )
 					);
 					?>
 				</p>
@@ -482,6 +503,9 @@ class PHP_Compatibility_Checker {
 								);
 								// The page notice has the full release message; keep this short.
 								switch ( $release['state'] ) {
+									case 'vulnerable':
+										$php_status = __( 'It has a critical security flaw that attackers are exploiting. Update PHP now.', 'php-compatibility-checker' );
+										break;
 									case 'update_available':
 										/* translators: %s: latest PHP release, e.g. 8.3.36 */
 										$php_status = sprintf( __( 'PHP %s is available.', 'php-compatibility-checker' ), $release['latest'] );
@@ -559,6 +583,9 @@ class PHP_Compatibility_Checker {
 					<# if ( data.has_errors ) { #>
 					<p><?php esc_html_e( 'Click on PHP Version to see errors and warnings', 'php-compatibility-checker' ); ?></p>
 					<# } #>
+					<# if ( data.skipped_note ) { #>
+					<p class="description">{{ data.skipped_note }}</p>
+					<# } #>
 					<# if ( data.bundled_only ) { #>
 					<p class="description"><?php esc_html_e( 'All of the problems are in bundled libraries, which often check for PHP features before using them. Test before treating them as blockers.', 'php-compatibility-checker' ); ?></p>
 					<# } #>
@@ -593,6 +620,46 @@ class PHP_Compatibility_Checker {
 	}
 
 	/**
+	 * Whether WordPress.org hosts a theme, from the update_themes transient.
+	 *
+	 * @since 1.7.0
+	 *
+	 * @param object|false $updates    update_themes transient.
+	 * @param string       $stylesheet Theme directory name.
+	 * @return bool
+	 */
+	private static function is_wporg_theme( $updates, string $stylesheet ): bool {
+		foreach ( array( 'response', 'no_update' ) as $list ) {
+			$entry = isset( $updates->{$list}[ $stylesheet ] ) ? (array) $updates->{$list}[ $stylesheet ] : null;
+			if ( $entry ) {
+				$url = isset( $entry['package'] ) && $entry['package'] ? $entry['package'] : ( isset( $entry['url'] ) ? $entry['url'] : '' );
+				return (bool) preg_match( '#^https://(downloads\.)?wordpress\.org/#', (string) $url ); // phpcs:ignore WordPress.WP.CapitalPDangit -- Hostname.
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Attach each item's stored scan result, when there is one for its current version.
+	 *
+	 * @since 1.7.0
+	 *
+	 * @param array[] $items Plugins or themes.
+	 * @param string  $type  "plugin" or "theme".
+	 * @return array[]
+	 */
+	private function with_stored_results( array $items, string $type ): array {
+		$results = new Results();
+		foreach ( $items as $index => $item ) {
+			$stored = $results->get( array_merge( $item, array( 'type' => $type ) ) );
+			if ( $stored ) {
+				$items[ $index ]['stored'] = $stored;
+			}
+		}
+		return $items;
+	}
+
+	/**
 	 * Notice about the server's PHP release, shown only when it needs attention.
 	 *
 	 * @since 1.6.5
@@ -601,21 +668,58 @@ class PHP_Compatibility_Checker {
 	 */
 	public function release_notice( $release ) {
 		$types = array(
+			'vulnerable'         => 'error',
 			'update_available'   => 'warning',
 			'unsupported_branch' => 'error',
 			'vendor_build'       => 'info',
 		);
 
-		if ( ! isset( $types[ $release['state'] ] ) ) {
-			return;
+		if ( isset( $types[ $release['state'] ] ) ) {
+			$links = array();
+			foreach ( isset( $release['advisories'] ) ? $release['advisories'] : array() as $advisory ) {
+				if ( empty( $advisory['conditions'] ) ) {
+					$links[] = sprintf(
+						'<a href="%1$s" target="_blank" rel="noopener noreferrer">%2$s</a>',
+						esc_url( $advisory['url'] ),
+						esc_html(
+							sprintf(
+								/* translators: %s: vulnerability name and CVE IDs. */
+								__( 'About %s', 'php-compatibility-checker' ),
+								Php_Releases::label( $advisory )
+							)
+						)
+					);
+				}
+			}
+
+			printf(
+				'<div class="notice notice-%1$s inline wpe-pcc-release-notice"><p><strong>%2$s</strong> %3$s%4$s</p></div>',
+				esc_attr( $types[ $release['state'] ] ),
+				esc_html__( 'Server PHP:', 'php-compatibility-checker' ),
+				esc_html( $release['message'] ),
+				$links ? ' ' . implode( ' · ', $links ) : '' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
+			);
 		}
 
-		printf(
-			'<div class="notice notice-%1$s inline wpe-pcc-release-notice"><p><strong>%2$s</strong> %3$s</p></div>',
-			esc_attr( $types[ $release['state'] ] ),
-			esc_html__( 'Server PHP:', 'php-compatibility-checker' ),
-			esc_html( $release['message'] )
-		);
+		// Configuration-dependent advisories: show the workaround.
+		foreach ( isset( $release['advisories'] ) ? $release['advisories'] : array() as $advisory ) {
+			if ( empty( $advisory['conditions'] ) || empty( $advisory['mitigation'] ) ) {
+				continue;
+			}
+			printf(
+				'<div class="notice notice-warning inline wpe-pcc-release-notice"><p><strong>%1$s</strong> %2$s <a href="%3$s" target="_blank" rel="noopener noreferrer">%4$s</a></p></div>',
+				esc_html(
+					sprintf(
+						/* translators: %s: CVE IDs. */
+						__( 'This server\'s PHP settings are exposed to %s.', 'php-compatibility-checker' ),
+						Php_Releases::label( $advisory )
+					)
+				),
+				esc_html( $advisory['mitigation'] ),
+				esc_url( $advisory['url'] ),
+				esc_html__( 'Read more', 'php-compatibility-checker' )
+			);
+		}
 	}
 
 	/**
