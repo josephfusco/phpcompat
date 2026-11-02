@@ -375,8 +375,12 @@ test.describe( 'PHP Compatibility scan', () => {
 		await mockScanner( page, { hold: [ 'passing-plugin' ] } );
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
+		// The item being scanned, not the number finished: never "0 of".
 		await expect( page.locator( '.wpe-pcc-progress' ) ).toContainText(
-			'Now scanning'
+			/Now scanning:\s*\d of 5/
+		);
+		await expect( page.locator( '.wpe-pcc-progress' ) ).not.toContainText(
+			'0 of 5'
 		);
 
 		await page.getByRole( 'link', { name: 'Cancel' } ).click();
