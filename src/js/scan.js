@@ -10,6 +10,7 @@ import {
 import { initResults, getSelectedIds } from './include/render';
 import { downloadReport, reportMeta } from './include/download';
 import { printReport } from './include/print-report';
+import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 
 ( function ( $ ) {
 	if ( 'undefined' === typeof checkerList ) {
@@ -132,11 +133,22 @@ import { printReport } from './include/print-report';
 			return;
 		}
 
-		// PDF: an accessible report, saved with the browser's print dialog so
-		// browsers that tag PDFs keep headings, tables, and language.
+		// PDF: a tagged, accessible PDF downloaded in one click (PDFKit,
+		// loaded on demand). Its built-in fonts only cover Latin text, so other
+		// scripts use the accessible print version instead.
 		const items = window.phpcompat.report;
-		if ( items.length ) {
-			printReport( items, reportMeta( items ) );
+		if ( ! items.length ) {
+			return;
+		}
+		const meta = reportMeta( items );
+		if ( needsUnicodeFallback( items, meta ) ) {
+			printReport( items, meta );
+			return;
+		}
+		try {
+			await savePdfReport( items, meta );
+		} catch {
+			printReport( items, meta );
 		}
 	} );
 

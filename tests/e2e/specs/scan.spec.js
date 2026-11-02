@@ -276,7 +276,7 @@ test.describe( 'PHP Compatibility scan', () => {
 		expect( progress ).toEqual( [ 5, 5 ] );
 	} );
 
-	test( 'downloads text, CSV, and JSON, and prints an accessible PDF report', async ( {
+	test( 'downloads PDF (default, tagged), text, CSV, and JSON reports', async ( {
 		admin,
 		page,
 	} ) => {
@@ -284,6 +284,10 @@ test.describe( 'PHP Compatibility scan', () => {
 		await admin.visitAdminPage( ...PAGE );
 		await scanButton( page ).click();
 		await scanFinished( page );
+
+		await expect(
+			page.getByRole( 'combobox', { name: 'Report format' } )
+		).toHaveValue( 'pdf' );
 
 		async function download( format ) {
 			await page
@@ -333,46 +337,18 @@ test.describe( 'PHP Compatibility scan', () => {
 		expect( problem.php[ '7.0' ] ).toBe( 'not_counted' );
 		expect( problem.php[ '7.2' ] ).toBe( 'fail' );
 
-		// PDF: the accessible report opens in the print dialog.
-		await page.evaluate( () => {
-			window.phpcompatPrinted = 0;
-			const proto = window.HTMLIFrameElement.prototype;
-			const { get } = Object.getOwnPropertyDescriptor(
-				proto,
-				'contentWindow'
-			);
-			Object.defineProperty( proto, 'contentWindow', {
-				get() {
-					const win = get.call( this );
-					if ( win ) {
-						win.print = () => window.phpcompatPrinted++;
-					}
-					return win;
-				},
-			} );
-		} );
-		await page
-			.getByRole( 'combobox', { name: 'Report format' } )
-			.selectOption( 'pdf' );
-		await page.getByRole( 'link', { name: 'Download Report' } ).click();
-
-		const report = page.frameLocator( 'iframe.wpe-pcc-print-frame' );
-		await expect( report.locator( 'html' ) ).toHaveAttribute(
-			'lang',
-			/.+/
-		);
-		await expect( report.getByRole( 'heading', { level: 1 } ) ).toHaveText(
-			'PHP Compatibility Report'
-		);
-		await expect( report.locator( '.summary .verdict' ) ).toContainText(
-			'1 of 3 checked plugins and themes have problems'
-		);
+		// PDF is the default format: a tagged PDF, downloaded in one click.
+		const pdf = await download( 'pdf' );
+		expect( pdf.name ).toMatch( /\.pdf$/ );
+		expect( pdf.text.startsWith( '%PDF-' ) ).toBe( true );
+		expect( pdf.text ).toContain( '/StructTreeRoot' );
+		expect( pdf.text ).toContain( '/Marked true' );
+		expect( pdf.text ).toMatch( /\/Lang \(/ );
+		expect( pdf.text ).toContain( '/DisplayDocTitle true' );
+		expect( pdf.text ).toContain( '(PHP Compatibility Checker ' );
 		await expect(
-			report.getByRole( 'table', { name: /includes\/legacy\.php/ } )
-		).toContainText( 'Example problem on PHP 7.2' );
-		expect( await page.evaluate( () => window.phpcompatPrinted ) ).toBe(
-			1
-		);
+			page.locator( 'iframe.wpe-pcc-print-frame' )
+		).toHaveCount( 0 );
 	} );
 
 	test( 'WP Engine sidebar only shows on WP Engine', async ( {

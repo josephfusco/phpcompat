@@ -13,4 +13,9 @@ module.exports = {
   entry: {
     scan: path.resolve(process.cwd(), "src/js", "scan.js"),
   },
+  performance: {
+    ...defaultConfig.performance,
+    // The PDF chunk is large but only loads when someone downloads a PDF.
+    assetFilter: (file) => !/^pdf\.js/.test(file) && !/\.map$/.test(file),
+  },
 };

@@ -239,3 +239,44 @@ describe( 'PDF report (accessible HTML, saved via print)', () => {
 		).toContain( 'bundled library' );
 	} );
 } );
+
+describe( 'PDF download (PDFKit)', () => {
+	it( 'is a tagged PDF with headings, tables, and lists', async () => {
+		const { PDFDocument } = await import( 'pdfkit' );
+		const { buildPdf, needsUnicodeFallback } =
+			await import( '../pdf-report' );
+		const meta = reportMeta( items );
+		expect( needsUnicodeFallback( items, meta ) ).toBe( false );
+		expect(
+			needsUnicodeFallback(
+				[ { ...items[ 2 ], name: 'お問い合わせフォーム' } ],
+				meta
+			)
+		).toBe( true );
+
+		const chunks = [];
+		await new Promise( ( resolve ) => {
+			buildPdf( PDFDocument, items, meta, {
+				onData: ( chunk ) => chunks.push( chunk ),
+				onEnd: resolve,
+			} );
+		} );
+		const pdf = Buffer.concat( chunks ).toString( 'latin1' );
+
+		expect( pdf ).toContain( '/StructTreeRoot' );
+		expect( pdf ).toContain( '/Marked true' );
+		expect( pdf ).toContain( '/DisplayDocTitle true' );
+		expect( pdf ).toContain( '(PHP Compatibility Checker 1.6.5)' );
+		[
+			'Document',
+			'H1',
+			'H2',
+			'H3',
+			'Table',
+			'TH',
+			'TD',
+			'L',
+			'LI',
+		].forEach( ( tag ) => expect( pdf ).toContain( `/S /${ tag }` ) );
+	} );
+} );

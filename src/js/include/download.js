@@ -81,7 +81,9 @@ export function reportMeta( items ) {
 function textReport( meta ) {
 	const { site, summary } = meta;
 	const lines = [
-		'PHP Compatibility Checker report',
+		site.plugin_version
+			? `PHP Compatibility Checker ${ site.plugin_version } report`
+			: 'PHP Compatibility Checker report',
 		'',
 		`Site:        ${ site.url }`,
 		`Generated:   ${ meta.generated_at }`,

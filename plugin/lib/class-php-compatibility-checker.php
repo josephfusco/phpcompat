@@ -410,8 +410,8 @@ class PHP_Compatibility_Checker {
 						<a id="downloadReport" class="button-primary" href="#"><span class="dashicons dashicons-download"></span> <?php esc_html_e( 'Download Report', 'php-compatibility-checker' ); ?></a>
 						<label class="screen-reader-text" for="wpe-pcc-export-format"><?php esc_html_e( 'Report format', 'php-compatibility-checker' ); ?></label>
 						<select id="wpe-pcc-export-format">
+							<option value="pdf" selected="selected"><?php esc_html_e( 'PDF', 'php-compatibility-checker' ); ?></option>
 							<option value="txt"><?php esc_html_e( 'Text', 'php-compatibility-checker' ); ?></option>
-							<option value="pdf"><?php esc_html_e( 'PDF (opens the print dialog)', 'php-compatibility-checker' ); ?></option>
 							<option value="csv"><?php esc_html_e( 'CSV', 'php-compatibility-checker' ); ?></option>
 							<option value="json"><?php esc_html_e( 'JSON', 'php-compatibility-checker' ); ?></option>
 						</select>
