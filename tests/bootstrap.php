@@ -5,6 +5,11 @@ require_once dirname( dirname( __FILE__ ) ) . '/vendor/autoload.php';
 
 Monkey\setUp();
 
+// The plugin's files exit when loaded outside WordPress.
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', dirname( __DIR__ ) . '/' );
+}
+
 // WordPress time constants used by the scanner.
 if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
 	define( 'HOUR_IN_SECONDS', 3600 );

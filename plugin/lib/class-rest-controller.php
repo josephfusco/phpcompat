@@ -311,9 +311,6 @@ class Rest_Controller {
 		if ( function_exists( 'set_time_limit' ) && false === strpos( (string) ini_get( 'disable_functions' ), 'set_time_limit' ) ) {
 			set_time_limit( 60 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Headroom for a slow batch; most take a few seconds.
 		}
-
-		// A notice printed before the JSON would break the response.
-		ini_set( 'display_errors', '0' ); // phpcs:ignore WordPress.PHP.IniSet.display_errors_Disallowed -- Keep the JSON response clean.
 	}
 
 	/**

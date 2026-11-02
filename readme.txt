@@ -252,9 +252,9 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 == Upgrade Notice ==
 
 = 2.0.0 =
-- PHP Compatibility scans no longer use an external service: the scanner is built into the plugin and checks PHP 7.4 through 8.5, including premium and custom code.
+- Built-in scanner, no external service: PHP 7.4 to 8.5, including premium and custom code.
 - Scans run on your site in short batches sized for shared hosting.
-- Requires PHP 7.4 and WordPress 6.4. Scan again after updating: results from earlier versions don't carry over.
+- Requires PHP 7.4 and WordPress 6.4. Scan again after updating.
 
 = 1.6.0 =
 - WordPress minimum increased from 4.8 to 5.6.
