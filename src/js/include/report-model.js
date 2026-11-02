@@ -3,7 +3,12 @@
  * ordering, wording, grouping. The renderers only decide how it looks.
  */
 import { __, _n, sprintf } from '@wordpress/i18n';
-import { isBundledLibrary, compareVersions, needsPhpNote } from './render';
+import {
+	isBundledLibrary,
+	compareVersions,
+	needsPhpNote,
+	LIBRARY_FOLDERS,
+} from './render';
 
 /** Report order: what needs action first. */
 export const STATUS_ORDER = [ 'problems', 'failed', 'not_checked', 'passes' ];
@@ -473,10 +478,10 @@ export function groupByMessage( rows ) {
  *         folder holding it when nested (e.g. "core/lib/vendor/"), or null.
  */
 export function libraryOf( file ) {
-	const match =
-		/^(.*?(?:^|\/))(vendor|vendor_prefixed|vendor-prefixed|third-party|node_modules)\/((?:@[^/]+\/)?[^/]+)(\/[^/]+)?\//i.exec(
-			file
-		);
+	const match = new RegExp(
+		`^(.*?(?:^|/))(${ LIBRARY_FOLDERS })/((?:@[^/]+/)?[^/]+)(/[^/]+)?/`,
+		'i'
+	).exec( file );
 	if ( ! match ) {
 		return null;
 	}

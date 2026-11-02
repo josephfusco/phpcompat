@@ -282,11 +282,6 @@ $color-warning: #dba617;
 		margin-left: 10px;
 	}
 
-	&-progress-note:not(:empty) {
-		margin-left: 10px;
-		color: #50575e;
-	}
-
 	&-select-actions {
 		margin: 0 0 8px;
 	}
@@ -300,8 +295,7 @@ $color-warning: #dba617;
 		border-right-color: $color-warning;
 	}
 
-	&-cancel,
-	&-progress-note:not(:empty) {
+	&-cancel {
 		margin-left: 0;
 		margin-right: 10px;
 	}

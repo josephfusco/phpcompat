@@ -30,10 +30,14 @@ export function compareVersions( a, b ) {
  * @return {boolean} Whether the file is bundled library code.
  */
 export function isBundledLibrary( file ) {
-	return /(^|\/)(vendor|vendor_prefixed|vendor-prefixed|third-party|node_modules)\//i.test(
-		file
-	);
+	return new RegExp( `(^|/)(${ LIBRARY_FOLDERS })/`, 'i' ).test( file );
 }
+
+/**
+ * Folders that hold bundled libraries (matches Scanner::is_bundled()).
+ */
+export const LIBRARY_FOLDERS =
+	'vendor|vendor_prefixed|vendor-prefixed|third-party|node_modules';
 
 /**
  * Render a result card with the core wp.template() helper.

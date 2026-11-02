@@ -105,8 +105,8 @@ class PHP_Compatibility_Checker {
 			'phpcompat-scan',
 			'checkerList',
 			array(
-				'plugins' => $this->with_stored_results( $this->get_plugins_to_scan(), 'plugin' ),
-				'themes'  => $this->with_stored_results( $this->get_themes_to_scan(), 'theme' ),
+				'plugins' => $this->get_plugins_to_scan(),
+				'themes'  => $this->get_themes_to_scan(),
 				'scanner' => Scanner_Bundle::browser_config(),
 				'site'    => array(
 					'url'            => home_url(),
@@ -639,26 +639,6 @@ class PHP_Compatibility_Checker {
 			}
 		}
 		return false;
-	}
-
-	/**
-	 * Attach each item's stored scan result, when there is one for its current version.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param array[] $items Plugins or themes.
-	 * @param string  $type  "plugin" or "theme".
-	 * @return array[]
-	 */
-	private function with_stored_results( array $items, string $type ): array {
-		$results = new Results();
-		foreach ( $items as $index => $item ) {
-			$stored = $results->get( array_merge( $item, array( 'type' => $type ) ) );
-			if ( $stored ) {
-				$items[ $index ]['stored'] = $stored;
-			}
-		}
-		return $items;
 	}
 
 	/**

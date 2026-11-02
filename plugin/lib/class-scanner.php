@@ -454,6 +454,7 @@ class Scanner {
 
 	/**
 	 * Whether a path is in a bundled library folder (vendor, third-party, ...).
+	 * Matches LIBRARY_FOLDERS in src/js/include/render.js.
 	 *
 	 * @param string $path Path relative to the item.
 	 * @return bool
