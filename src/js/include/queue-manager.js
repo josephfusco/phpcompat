@@ -185,13 +185,18 @@ export function updateProgress() {
 	showProgressCount();
 }
 
+/**
+ * "1 of 3": the item being scanned now, not the number finished, so the
+ * first item doesn't read "0 of 3" while a large plugin takes a minute.
+ */
 function showProgressCount() {
+	const { completed, total } = window.phpcompat;
 	progressCount.text(
 		sprintf(
-			/* translators: 1: number scanned, 2: total number to scan. */
+			/* translators: 1: number of the item being scanned, 2: total number to scan. */
 			__( '%1$d of %2$d', 'php-compatibility-checker' ),
-			window.phpcompat.completed,
-			window.phpcompat.total
+			Math.min( completed + 1, total ),
+			total
 		)
 	);
 }
