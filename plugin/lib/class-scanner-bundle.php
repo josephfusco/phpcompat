@@ -128,30 +128,49 @@ class Scanner_Bundle {
 	}
 
 	/**
+	 * Whether scans may run from the scan page. A host can turn them off, for
+	 * one site or a whole platform, with
+	 * define( 'WPEPHPCOMPAT_DISABLE_SCANNING', true ) or the
+	 * wpephpcompat_scanning_enabled filter. Stored results, reports, Site
+	 * Health, and WP-CLI keep working.
+	 *
+	 * @return bool
+	 */
+	public static function scanning_enabled(): bool {
+		$enabled = ! ( defined( 'WPEPHPCOMPAT_DISABLE_SCANNING' ) && WPEPHPCOMPAT_DISABLE_SCANNING );
+
+		/**
+		 * Filters whether scans may run from the scan page.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param bool $enabled False when WPEPHPCOMPAT_DISABLE_SCANNING is set.
+		 */
+		return (bool) apply_filters( 'wpephpcompat_scanning_enabled', $enabled );
+	}
+
+	/**
+	 * What people see when scanning is turned off.
+	 *
+	 * @return string
+	 */
+	public static function disabled_message(): string {
+		return __( 'Scanning from this page is turned off on this site, usually by the host. You can still scan with WP-CLI: wp php-compat scan.', 'php-compatibility-checker' );
+	}
+
+	/**
 	 * Settings the scan page needs.
 	 *
 	 * @return array
 	 */
 	public static function browser_config(): array {
 		return array(
-			'ruleset'     => self::ruleset(),
-			'tools'       => self::tools(),
-			'phpVersions' => self::PHP_VERSIONS,
+			'ruleset'         => self::ruleset(),
+			'tools'           => self::tools(),
+			'phpVersions'     => self::PHP_VERSIONS,
+			'enabled'         => self::scanning_enabled(),
+			'disabledMessage' => self::disabled_message(),
 		);
-	}
-
-	/**
-	 * Scan a directory (or a one-file plugin) in this PHP process.
-	 *
-	 * @param string   $dir      Directory or file to scan.
-	 * @param string[] $versions PHP versions; defaults to PHP_VERSIONS.
-	 * @return array Report (see Results::sanitize_report()).
-	 * @throws \RuntimeException When the scanner is missing.
-	 */
-	public static function scan_directory( string $dir, array $versions = self::PHP_VERSIONS ): array {
-		self::load();
-
-		return \WPEngine_PHPCompat\Bundle\scan( $dir, $versions );
 	}
 
 	/**

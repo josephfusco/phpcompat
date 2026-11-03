@@ -180,9 +180,13 @@ class Scanner {
 				$fingerprint = '';
 				if ( ! is_array( $report ) ) {
 					// Taken before scanning, so a file edited during the scan isn't covered by it.
-					$list                   = self::file_list( $root, self::fingerprint_salt( $item ) );
-					$fingerprint            = $list['fingerprint'];
-					$report                 = Scanner_Bundle::scan_directory( $root );
+					// The same file list as the scan page, so both check the same files.
+					// WP-CLI isn't bound by a web request's memory, so large files are included.
+					$list        = self::file_list( $root, self::fingerprint_salt( $item ) );
+					$fingerprint = $list['fingerprint'];
+					$files       = array_merge( $list['files'], $list['skipped'] );
+					sort( $files, SORT_STRING );
+					$report                 = Scanner_Bundle::scan_files( is_file( $root ) ? dirname( $root ) : $root, $files );
 					$report['platform_php'] = $list['platform_php'];
 				}
 				$stored = $results->save( $item, $report, 'local', $fingerprint );
@@ -304,6 +308,12 @@ class Scanner {
 	}
 
 	/**
+	 * Folders left out of every scan: npm packages (PHP there is build tooling,
+	 * never loaded by WordPress) and version control.
+	 */
+	const SKIPPED_FOLDERS = array( 'node_modules', '.git', '.svn', '.hg' );
+
+	/**
 	 * An item's PHP files, sorted, with a fingerprint of their current state.
 	 *
 	 * The fingerprint covers every PHP file's path, size, and modification time
@@ -327,8 +337,15 @@ class Scanner {
 			$entries[ basename( $root ) ] = array( (int) filesize( $root ), (int) filemtime( $root ) );
 		} elseif ( is_dir( $root ) ) {
 			// Doesn't follow symlinked directories, so the walk stays inside the item.
+			// Folders WordPress never loads PHP from (build tooling, version
+			// control) aren't entered at all, which keeps the walk short.
 			$iterator = new \RecursiveIteratorIterator(
-				new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::UNIX_PATHS )
+				new \RecursiveCallbackFilterIterator(
+					new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::UNIX_PATHS ),
+					static function ( $entry ) {
+						return ! ( $entry->isDir() && in_array( $entry->getFilename(), self::SKIPPED_FOLDERS, true ) );
+					}
+				)
 			);
 			foreach ( $iterator as $file ) {
 				if ( $file->isLink() || ! $file->isFile() || 'php' !== strtolower( $file->getExtension() ) ) {

@@ -54,7 +54,7 @@ add_action(
 add_action(
 	'init',
 	static function () {
-		foreach ( array( 'phpcompat_e2e_is_wpe', 'phpcompat_e2e_advisory' ) as $setting ) {
+		foreach ( array( 'phpcompat_e2e_is_wpe', 'phpcompat_e2e_advisory', 'phpcompat_e2e_scanning_off' ) as $setting ) {
 			register_setting(
 				'general',
 				$setting,
@@ -65,6 +65,14 @@ add_action(
 				)
 			);
 		}
+	}
+);
+
+// Tests turn scanning off the way a host would.
+add_filter(
+	'wpephpcompat_scanning_enabled',
+	static function ( $enabled ) {
+		return $enabled && ! get_option( 'phpcompat_e2e_scanning_off' );
 	}
 );
 

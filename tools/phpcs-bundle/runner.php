@@ -339,7 +339,15 @@ final class Engine {
  */
 function php_files( string $dir ): array {
 	$paths    = array();
-	$iterator = new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ) );
+	// Same folders left out as Scanner::SKIPPED_FOLDERS in the plugin.
+	$iterator = new \RecursiveIteratorIterator(
+		new \RecursiveCallbackFilterIterator(
+			new \RecursiveDirectoryIterator( $dir, \FilesystemIterator::SKIP_DOTS ),
+			static function ( $entry ) {
+				return ! ( $entry->isDir() && in_array( $entry->getFilename(), array( 'node_modules', '.git', '.svn', '.hg' ), true ) );
+			}
+		)
+	);
 	foreach ( $iterator as $file ) {
 		if ( $file->isFile() && 'php' === strtolower( $file->getExtension() ) ) {
 			$paths[] = $file->getPathname();

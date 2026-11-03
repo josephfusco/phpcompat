@@ -1,6 +1,6 @@
 <?php
 /**
- * Tests for keeping scan load down: the site's scan lock. (The time budget is tested with the real scanner in RunnerTest.)
+ * Tests for keeping scan load down: the site's scan lock and the host's off switch. (The time budget is tested with the real scanner in RunnerTest.)
  *
  * @package WPEngine_PHPCompat\PHP_Compatibility_Checker
  */
@@ -113,6 +113,13 @@ class ScanLoadTest extends TestCase {
 		$lock->release( 'tokenAAAAAAAAAAAAAAA' );
 		$this->assertArrayNotHasKey( Scan_Lock::OPTION, $this->options );
 		$this->assertNull( $lock->acquire( 'tokenBBBBBBBBBBBBBBB', 2 ), 'Released: the next scan can start.' );
+	}
+
+	public function test_scanning_is_on_unless_a_host_turns_it_off() {
+		$this->assertTrue( Scanner_Bundle::scanning_enabled() );
+
+		Monkey\Filters\expectApplied( 'wpephpcompat_scanning_enabled' )->once()->with( true )->andReturn( false );
+		$this->assertFalse( Scanner_Bundle::scanning_enabled() );
 	}
 
 	public function test_a_corrupt_lock_is_replaced() {

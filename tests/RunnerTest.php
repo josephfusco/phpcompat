@@ -80,6 +80,26 @@ class RunnerTest extends TestCase {
 		$this->assertSame( array( '8.0' ), $report['incompatible'] );
 	}
 
+	public function test_npm_packages_are_not_scanned() {
+		$dir = sys_get_temp_dir() . '/pcc-npm-' . uniqid();
+		mkdir( $dir . '/node_modules/pkg', 0777, true );
+		// Fails on PHP 7.4 (removed mysql extension), but WordPress never loads it.
+		file_put_contents( $dir . '/node_modules/pkg/tool.php', "<?php\nmysql_connect( 'localhost' );\n" );
+		file_put_contents( $dir . '/plugin.php', "<?php\n// Fine.\n" );
+
+		try {
+			$report = Bundle\scan( $dir, array( '7.4' ) );
+		} finally {
+			unlink( $dir . '/node_modules/pkg/tool.php' );
+			unlink( $dir . '/plugin.php' );
+			rmdir( $dir . '/node_modules/pkg' );
+			rmdir( $dir . '/node_modules' );
+			rmdir( $dir );
+		}
+
+		$this->assertSame( array(), $report['incompatible'] );
+	}
+
 	public function test_files_that_are_not_utf8_are_still_reported() {
 		$dir = sys_get_temp_dir() . '/pcc-latin1-' . uniqid();
 		mkdir( $dir );

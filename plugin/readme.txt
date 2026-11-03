@@ -74,7 +74,11 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
     Barely. The scan page sends one small request at a time and sizes each to take a few seconds, waits and retries if your site is busy, and skips (and lists) any file that runs into a memory or time limit. A first scan of a large site takes a few minutes; later scans only check what changed. You can also run `wp php-compat scan` from WP-CLI.
 
-= 7. I found a bug, or have a suggestion, can I contribute back? =
+= 7. Can a host turn scanning off? =
+
+    Yes. Add `define( 'WPEPHPCOMPAT_DISABLE_SCANNING', true );` to wp-config.php, or return false from the `wpephpcompat_scanning_enabled` filter (in a must-use plugin to cover a whole platform). The scan page then shows a notice instead of scanning, and the scan endpoint refuses requests. Stored results, reports, Site Health, and `wp php-compat scan` keep working.
+
+= 8. I found a bug, or have a suggestion, can I contribute back? =
 
     Yes! Please open an issue or pull request on the [plugin's GitHub repo](https://github.com/wpengine/phpcompat). Contributions are welcome.
 
@@ -82,11 +86,11 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
     To disclose security issues for this plugin please email WordPress@wpengine.com.
 
-= 8. Does it check whether my server's PHP is secure? =
+= 9. Does it check whether my server's PHP is secure? =
 
     It checks whether the server runs the latest release of a PHP branch that still gets security fixes, using php.net's release data, and whether the version is affected by a critical vulnerability such as PHP2Shell. The scan page shows a notice if not. It can't confirm builds from your host or Linux distribution, which often include security fixes under an older-looking version number, so for those it points you to your host's security notices. It can't patch PHP for you; ask your host to update.
 
-= 9. What external services does this plugin use? =
+= 10. What external services does this plugin use? =
 
     * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
 
@@ -104,6 +108,9 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 - Site Health: a test for your active plugins and theme (from stored results; it never scans), and a PHP Compatibility section on the Info tab, so results go into "Copy site info".
 - Flag plugins and themes whose code, or whose Composer dependencies, need a newer PHP than their "Requires PHP" header says.
 - Requires PHP 7.4 and WordPress 6.4.
+- Hosts can turn scanning off with the `WPEPHPCOMPAT_DISABLE_SCANNING` constant or the `wpephpcompat_scanning_enabled` filter. Stored results, Site Health, and WP-CLI keep working.
+- Only one scan runs per site at a time; a second admin or tab sees who is scanning instead of starting another.
+- Skip `node_modules` and version control folders, whose PHP WordPress never loads. WP-CLI and the scan page check the same files.
 - Flag critical PHP vulnerabilities on the server, starting with PHP2Shell (CVE-2026-109618, CVE-2026-109619): the scan page says the server is vulnerable and which release fixes it. CVE-2026-115560's workaround is shown when the server's session settings are exposed.
 - Keep the familiar scan page from 1.6.4, with fixes: a third scan option to choose which plugins and themes to scan (#67), a Cancel link while scanning (#56), progress for each plugin and theme while it's scanned (#42), and clear errors when the scanner can't load (offline, blocked, or timed out) instead of "Status: 0" (#231), and a Scan again button once a scan finishes.
 - Each result shows its error count, and notes when every problem is in a bundled library (vendor, third-party), which is a common source of false positives.

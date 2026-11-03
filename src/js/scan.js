@@ -28,6 +28,8 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		report: [],
 	};
 
+	// The host can turn scanning off (see Scanner_Bundle::scanning_enabled()).
+	const scanningEnabled = false !== checkerList.scanner?.enabled;
 	const activeOnlySwitch = $( 'input[type=radio][name=active_plugins]' );
 	const runButton = $( '#runButton' );
 
@@ -191,14 +193,16 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		$( '.wpe-pcc-select-actions' ).toggle( 'choose' === mode() );
 		window.phpcompat.finished = false;
 		runButton
-			.prop( 'disabled', false )
+			.prop( 'disabled', ! scanningEnabled )
 			.addClass( 'button-primary' )
 			.val( __( 'Scan site', 'php-compatibility-checker' ) );
 		updateRunButton();
 	}
 
 	function updateRunButton() {
-		if ( 'choose' === mode() ) {
+		if ( ! scanningEnabled ) {
+			runButton.prop( 'disabled', true );
+		} else if ( 'choose' === mode() ) {
 			runButton.prop( 'disabled', ! getSelectedIds().length );
 		}
 	}

@@ -107,6 +107,9 @@ class Site_Health {
 			$result['status']      = 'recommended';
 			$result['label']       = __( 'Check your plugins and themes for PHP compatibility', 'php-compatibility-checker' );
 			$result['description'] = '<p>' . esc_html__( 'Before you or your host upgrade PHP, check that your active plugins and theme work on newer versions. The PHP Compatibility Checker scans them on this site, a few files at a time.', 'php-compatibility-checker' ) . '</p>';
+			if ( ! Scanner_Bundle::scanning_enabled() ) {
+				$result['description'] .= '<p>' . esc_html( Scanner_Bundle::disabled_message() ) . '</p>';
+			}
 			return $result;
 		}
 

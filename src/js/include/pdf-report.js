@@ -13,19 +13,18 @@ import {
 	executiveSummary,
 	formatDate,
 	glanceDetails,
-	groupByMessage,
 	itemFacts,
 	pageLang,
 	playgroundUrl,
+	problemTables,
+	problemTypeLabel,
 	recommendation,
 	reportFacts,
 	sortItems,
-	splitProblems,
 	statusLabels,
 	statusTiles,
 	typeLabel,
 	versionList,
-	versionsWith,
 } from './report-model';
 
 const COLOR = {
@@ -629,28 +628,14 @@ export function buildPdf( PDFDocument, items, meta, stream = {} ) {
 			);
 			doc.moveDown( 0.6 );
 
-			const { files, libraries } = splitProblems( item );
+			const { groups, libraries, showPhp } = problemTables( item );
 			const checked = Object.keys( item.php );
-			// Only show versions per row when they differ from the item's.
-			const fails = versionsWith( item, 'fail' ).join( ', ' );
 			// The item's own code: one table, a row naming each file above its problems.
-			if ( files.length ) {
-				const groups = files.map( ( file ) => ( {
-					file: file.file,
-					rows: groupByMessage( file.rows ),
-				} ) );
-				const showPhp = groups.some( ( group ) =>
-					group.rows.some(
-						( row ) => row.versions.join( ', ' ) !== fails
-					)
-				);
+			if ( groups.length ) {
 				const columns = showPhp ? 4 : 3;
 				const phpW = showPhp ? 56 : 0;
 				const typeCell = ( row ) => ( {
-					text:
-						'WARNING' === row.type
-							? __( 'Warning', 'php-compatibility-checker' )
-							: __( 'Error', 'php-compatibility-checker' ),
+					text: problemTypeLabel( row.type ),
 					textColor:
 						'WARNING' === row.type ? COLOR.warning : COLOR.error,
 					font: { src: 'Helvetica-Bold', size: 9 },

@@ -30,7 +30,8 @@ export class ScanError extends Error {
 	/**
 	 * @param {string} message Message for people.
 	 * @param {string} status  "failed", "skipped", or "busy" (someone else is
-	 *                         scanning the site, so the whole scan stops).
+	 *                         scanning the site, or scanning is turned off,
+	 *                         so the whole scan stops).
 	 */
 	constructor( message, status = 'failed' ) {
 		super( message );
@@ -78,6 +79,7 @@ const FILE_ATTEMPTS = 2;
 const FATAL_CODES = [
 	'phpcompat_files_changed',
 	'phpcompat_scan_running',
+	'phpcompat_scanning_disabled',
 	'phpcompat_no_scanner',
 	'phpcompat_unknown_item',
 	'phpcompat_no_files',
@@ -588,7 +590,9 @@ function toScanError( error, signal ) {
 	}
 	if (
 		error instanceof BatchError &&
-		'phpcompat_scan_running' === error.code
+		[ 'phpcompat_scan_running', 'phpcompat_scanning_disabled' ].includes(
+			error.code
+		)
 	) {
 		return new ScanError( error.message, 'busy' );
 	}

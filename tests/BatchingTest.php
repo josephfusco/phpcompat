@@ -49,6 +49,19 @@ class BatchingTest extends TestCase {
 		$this->assertMatchesRegularExpression( '/^[a-f0-9]{32}$/', $list['fingerprint'] );
 	}
 
+	public function test_build_tool_and_version_control_folders_are_skipped() {
+		foreach ( array( 'node_modules/pkg', '.git/hooks', 'vendor/lib' ) as $folder ) {
+			mkdir( $this->dir . '/' . $folder, 0777, true );
+			file_put_contents( $this->dir . '/' . $folder . '/x.php', '<?php // x' );
+		}
+
+		$files = Scanner::file_list( $this->dir )['files'];
+
+		$this->assertContains( 'vendor/lib/x.php', $files, 'Bundled libraries are still scanned; WordPress loads them.' );
+		$this->assertNotContains( 'node_modules/pkg/x.php', $files );
+		$this->assertNotContains( '.git/hooks/x.php', $files );
+	}
+
 	public function test_fingerprint_is_stable_until_files_change() {
 		$first = Scanner::file_list( $this->dir, '1.0|rules' )['fingerprint'];
 

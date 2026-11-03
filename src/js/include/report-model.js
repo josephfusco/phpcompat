@@ -561,6 +561,40 @@ export function splitProblems( item ) {
 }
 
 /**
+ * The problem tables for one item, shared by the PDF and print reports: the
+ * item's own files with their problems grouped by message, the bundled
+ * libraries, and whether rows need their own PHP column (only when a row's
+ * versions differ from the item's).
+ *
+ * @param {Object} item Recorded result.
+ * @return {{fails: string, groups: Object[], libraries: Object[], showPhp: boolean}} Tables.
+ */
+export function problemTables( item ) {
+	const fails = versionsWith( item, 'fail' ).join( ', ' );
+	const { files, libraries } = splitProblems( item );
+	const groups = files.map( ( file ) => ( {
+		file: file.file,
+		rows: groupByMessage( file.rows ),
+	} ) );
+	const showPhp = groups.some( ( group ) =>
+		group.rows.some( ( row ) => row.versions.join( ', ' ) !== fails )
+	);
+	return { fails, groups, libraries, showPhp };
+}
+
+/**
+ * "Warning" or "Error" for a problem row.
+ *
+ * @param {string} type Row type from PHP_CodeSniffer (WARNING or ERROR).
+ * @return {string} Label.
+ */
+export function problemTypeLabel( type ) {
+	return 'WARNING' === type
+		? __( 'Warning', 'php-compatibility-checker' )
+		: __( 'Error', 'php-compatibility-checker' );
+}
+
+/**
  * Whether every problem in an item is in a bundled library.
  *
  * @param {Object} item Recorded result.

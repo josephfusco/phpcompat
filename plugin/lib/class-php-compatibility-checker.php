@@ -406,7 +406,7 @@ class PHP_Compatibility_Checker {
 								<th scope="row"></th>
 								<td>
 									<div class="wpe-pcc-run-scan">
-										<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button button-primary" />
+										<input name="run" id="runButton" type="button" value="<?php esc_attr_e( 'Scan site', 'php-compatibility-checker' ); ?>" class="button button-primary" <?php disabled( ! Scanner_Bundle::scanning_enabled() ); ?> />
 										<div class="wpe-pcc-scan-information">
 											<span style="display:none; visibility:visible;" class="spinner wpe-pcc-spinner"></span>
 											<span class="wpe-progress-active wpe-pcc-progress" style="display:none;">
@@ -416,6 +416,9 @@ class PHP_Compatibility_Checker {
 											</span>
 										</div> <!-- /wpe-pcc-scan-information -->
 									</div> <!-- /wpe-pcc-run-scan -->
+									<?php if ( ! Scanner_Bundle::scanning_enabled() ) : ?>
+										<div class="notice notice-info inline wpe-pcc-disabled"><p><?php echo esc_html( Scanner_Bundle::disabled_message() ); ?></p></div>
+									<?php endif; ?>
 								</td>
 							</tr>
 						</tbody>
