@@ -367,9 +367,10 @@ describe( 'scanItem', () => {
 				} ),
 		} );
 
-		await expect( settle( scanItem( job ) ) ).rejects.toThrow(
-			'Alex is already scanning this site.'
-		);
+		const error = await settle( scanItem( job ) ).catch( ( e ) => e );
+		expect( error.message ).toBe( 'Alex is already scanning this site.' );
+		// "busy" tells the queue to stop the whole scan, not fail this item.
+		expect( error.status ).toBe( 'busy' );
 		expect( apiFetch ).toHaveBeenCalledTimes( 1 );
 	} );
 
