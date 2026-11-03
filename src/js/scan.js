@@ -44,6 +44,20 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		init();
 	} );
 
+	// Someone else is scanning the site: go back to the list and say so once,
+	// next to the button, instead of failing every plugin and theme.
+	$( document ).on( 'phpcompat:busy', function ( event, message ) {
+		init();
+		$(
+			'<div class="notice notice-warning inline wpe-pcc-busy" role="status"><p></p></div>'
+		)
+			.find( 'p' )
+			.text( message )
+			.end()
+			.insertAfter( '.wpe-pcc-run-scan' );
+		runButton.trigger( 'focus' );
+	} );
+
 	// Stop a running scan and go back to the list (#56).
 	$( '#cancelButton' ).on( 'click', function ( event ) {
 		event.preventDefault();
@@ -80,6 +94,7 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 		// Recorded for the reports: what this scan covered.
 		window.phpcompat.scope = mode();
 
+		$( '.wpe-pcc-busy' ).remove();
 		activeOnlySwitch.prop( 'disabled', true );
 		$( this ).prop( 'disabled', true );
 		startProgress();
@@ -169,6 +184,7 @@ import { savePdfReport, needsUnicodeFallback } from './include/pdf-report';
 	}
 
 	function init() {
+		$( '.wpe-pcc-busy' ).remove();
 		initQueue( checkerList, mode() );
 		initResults( checkerList, mode() );
 		activeOnlySwitch.prop( 'disabled', false );

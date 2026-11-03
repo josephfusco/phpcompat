@@ -12,15 +12,16 @@ const fixtures = require( '../fixtures/scan-fixtures.json' );
  * @param {Object}                          options
  * @param {Object<string, string>}          options.fail Slug => error message, to make an item's scan fail.
  * @param {string[]}                        options.hold Slugs whose scan waits until window.phpcompatRelease() is called.
+ * @param {Object<string, string>}          options.busy Slug => message, to refuse an item's scan because someone else is scanning the site.
  * @return {Promise<string[]>} Scanned slugs.
  */
-async function mockScanner( page, { fail = {}, hold = [] } = {} ) {
+async function mockScanner( page, { fail = {}, hold = [], busy = {} } = {} ) {
 	const scanned = [];
 	await page.exposeFunction( 'phpcompatScanned', ( slug ) =>
 		scanned.push( slug )
 	);
 	await page.addInitScript(
-		( { data, failures, held } ) => {
+		( { data, failures, held, refused } ) => {
 			let release;
 			const gate = new Promise( ( resolve ) => ( release = resolve ) );
 			window.phpcompatRelease = () => release();
@@ -33,6 +34,9 @@ async function mockScanner( page, { fail = {}, hold = [] } = {} ) {
 				onStatus( 'Checking files: 3 of 10…', { value: 3, max: 10 } );
 				if ( held.includes( job.slug ) ) {
 					await gate;
+				}
+				if ( refused[ job.slug ] ) {
+					throw new ScanError( refused[ job.slug ], 'busy' );
 				}
 				if ( failures[ job.slug ] ) {
 					throw new ScanError( failures[ job.slug ] );
@@ -76,7 +80,7 @@ async function mockScanner( page, { fail = {}, hold = [] } = {} ) {
 				};
 			};
 		},
-		{ data: fixtures, failures: fail, held: hold }
+		{ data: fixtures, failures: fail, held: hold, refused: busy }
 	);
 	return scanned;
 }

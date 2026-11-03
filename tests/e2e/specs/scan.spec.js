@@ -395,6 +395,42 @@ test.describe( 'PHP Compatibility scan', () => {
 		await expect( item ).not.toContainText( 'Status: 0' );
 	} );
 
+	test( 'stops and says so once when someone else is scanning', async ( {
+		admin,
+		page,
+	} ) => {
+		const message =
+			'Alex is already scanning this site. Try again when that scan finishes.';
+		// The site refuses every item while the other scan holds the lock.
+		const busy = Object.fromEntries(
+			[
+				'passing-plugin',
+				'problem-plugin',
+				'new-php-plugin',
+				'custom-plugin',
+				'inactive-plugin',
+				'passing-theme',
+			].map( ( slug ) => [ slug, message ] )
+		);
+		const scanned = await mockScanner( page, { busy } );
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+
+		const notice = page.locator( '.wpe-pcc-busy' );
+		await expect( notice ).toHaveCount( 1 );
+		await expect( notice ).toHaveText( message );
+		// No item is marked as failed, and the scan stopped at the first refusal.
+		await expect( results( page, 'failed' ) ).toHaveCount( 0 );
+		await expect( page.locator( '.wpe-pcc-progress' ) ).toBeHidden();
+		expect( scanned ).toHaveLength( 1 );
+		await expect( scanButton( page ) ).toBeEnabled();
+
+		// Trying again while the other scan runs replaces the notice; they don't pile up.
+		await scanButton( page ).click();
+		await expect( notice ).toHaveCount( 1 );
+		expect( scanned ).toHaveLength( 2 );
+	} );
+
 	test( 'shows progress while scanning (#42)', async ( { admin, page } ) => {
 		await mockScanner( page, { hold: [ 'passing-plugin' ] } );
 		await admin.visitAdminPage( ...PAGE );

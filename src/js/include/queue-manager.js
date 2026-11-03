@@ -110,6 +110,13 @@ export async function executeJob( job, cb ) {
 		if ( ! current() ) {
 			return;
 		}
+		// Someone else is scanning the site: every item would be refused the
+		// same way, so stop the whole scan and say so once (see scan.js).
+		if ( error instanceof ScanError && 'busy' === error.status ) {
+			window.phpcompat.running = false;
+			$( document ).trigger( 'phpcompat:busy', [ error.message ] );
+			return;
+		}
 		updateProgress();
 		updateResultFailure(
 			{

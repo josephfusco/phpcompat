@@ -29,7 +29,8 @@ import { __, _n, sprintf } from '@wordpress/i18n';
 export class ScanError extends Error {
 	/**
 	 * @param {string} message Message for people.
-	 * @param {string} status  "failed" or "skipped".
+	 * @param {string} status  "failed", "skipped", or "busy" (someone else is
+	 *                         scanning the site, so the whole scan stops).
 	 */
 	constructor( message, status = 'failed' ) {
 		super( message );
@@ -584,6 +585,12 @@ function toScanError( error, signal ) {
 	}
 	if ( error instanceof ScanError ) {
 		return error;
+	}
+	if (
+		error instanceof BatchError &&
+		'phpcompat_scan_running' === error.code
+	) {
+		return new ScanError( error.message, 'busy' );
 	}
 	if (
 		error instanceof BatchError &&
