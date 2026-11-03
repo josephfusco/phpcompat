@@ -20,6 +20,8 @@ const {
 	splitProblems,
 	splitFound,
 	glanceDetails,
+	problemTables,
+	problemTypeLabel,
 } = await import( '../report-model' );
 const { buildReportHtml } = await import( '../print-report' );
 const { csvCell, csvReport, reportMeta } = await import( '../download' );
@@ -358,6 +360,35 @@ describe( 'report model', () => {
 				versions: [ '7.4', '8.0' ],
 			},
 		] );
+	} );
+
+	it( 'builds the problem tables both reports use', () => {
+		const item = {
+			php: { 7.4: 'fail', '8.0': 'fail', 8.4: 'pass' },
+			problems: [
+				problem( '7.4', 10, 'everywhere', 'inc/own.php' ),
+				problem( '8.0', 10, 'everywhere', 'inc/own.php' ),
+				problem( '7.4', 1, 'lib error', 'vendor/acme/lib/a.php' ),
+			],
+		};
+		const tables = problemTables( item );
+
+		expect( tables.fails ).toBe( '7.4, 8.0' );
+		expect( tables.groups.map( ( group ) => group.file ) ).toEqual( [
+			'inc/own.php',
+		] );
+		expect( tables.libraries.map( ( lib ) => lib.name ) ).toEqual( [
+			'acme/lib',
+		] );
+		// Every row fails on the item's versions, so no PHP column.
+		expect( tables.showPhp ).toBe( false );
+
+		// One row on fewer versions than the item: rows get their own PHP column.
+		item.problems.push( problem( '8.0', 20, 'only 8.0', 'inc/own.php' ) );
+		expect( problemTables( item ).showPhp ).toBe( true );
+
+		expect( problemTypeLabel( 'WARNING' ) ).toBe( 'Warning' );
+		expect( problemTypeLabel( 'ERROR' ) ).toBe( 'Error' );
 	} );
 
 	it( 'merges messages that differ only in what was found', () => {

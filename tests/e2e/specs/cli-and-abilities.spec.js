@@ -109,6 +109,35 @@ test.describe( 'WP-CLI', () => {
 			message: 'Example problem on PHP 8.1',
 		} );
 	} );
+
+	test( 'php-status reports the server PHP version and releases', () => {
+		const { status, stdout } = wpCli( [
+			'php-compat',
+			'php-status',
+			'--format=json',
+		] );
+		expect( status ).toBe( 0 );
+		const report = parseJson( stdout );
+		expect( report.php_version ).toMatch( /^\d+\.\d+$/ );
+		// The fixture plugin supplies php.net data with a newer security release.
+		expect( report.release.state ).toBe( 'update_available' );
+		expect( report.release.latest_is_security ).toBe( true );
+	} );
+
+	test( 'scan still works when a host turns scanning off', () => {
+		wpCli( [ 'option', 'update', 'phpcompat_e2e_scanning_off', '1' ] );
+		try {
+			const { status } = wpCli( [
+				'php-compat',
+				'scan',
+				'passing-plugin',
+				'--format=count',
+			] );
+			expect( status ).toBe( 0 );
+		} finally {
+			wpCli( [ 'option', 'delete', 'phpcompat_e2e_scanning_off' ] );
+		}
+	} );
 } );
 
 test.describe( 'Abilities API', () => {

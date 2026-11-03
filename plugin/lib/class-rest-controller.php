@@ -229,6 +229,11 @@ class Rest_Controller {
 	 * }
 	 */
 	public function scan_batch( WP_REST_Request $request ) {
+		// The host turned scanning off (see Scanner_Bundle::scanning_enabled()).
+		if ( ! Scanner_Bundle::scanning_enabled() ) {
+			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );
+		}
+
 		$item = $this->find_item( (string) $request['type'], (string) $request['slug'] );
 		if ( ! $item ) {
 			return new WP_Error( 'phpcompat_unknown_item', __( 'That plugin or theme isn\'t installed.', 'php-compatibility-checker' ), array( 'status' => 404 ) );

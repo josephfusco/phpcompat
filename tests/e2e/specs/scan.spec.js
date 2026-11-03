@@ -56,6 +56,7 @@ test.describe( 'PHP Compatibility scan', () => {
 	test.beforeEach( async ( { page, requestUtils } ) => {
 		await setWpEngine( requestUtils, false );
 		await setOption( requestUtils, 'phpcompat_e2e_advisory', false );
+		await setOption( requestUtils, 'phpcompat_e2e_scanning_off', false );
 		await requestUtils.rest( {
 			method: 'POST',
 			path: '/phpcompat-e2e/v1/reset',
@@ -429,6 +430,83 @@ test.describe( 'PHP Compatibility scan', () => {
 		await scanButton( page ).click();
 		await expect( notice ).toHaveCount( 1 );
 		expect( scanned ).toHaveLength( 2 );
+	} );
+
+	test( 'a host can turn scanning off', async ( {
+		admin,
+		page,
+		requestUtils,
+	} ) => {
+		await setOption( requestUtils, 'phpcompat_e2e_scanning_off', true );
+		const message =
+			'Scanning from this page is turned off on this site, usually by the host. You can still scan with WP-CLI: wp php-compat scan.';
+
+		await admin.visitAdminPage( ...PAGE );
+		await expect( scanButton( page ) ).toBeDisabled();
+		await expect( page.locator( '.wpe-pcc-disabled' ) ).toHaveText(
+			message
+		);
+
+		// Switching scan options doesn't turn the button back on.
+		await page
+			.getByRole( 'radio', { name: 'Scan all plugins and themes' } )
+			.check();
+		await expect( scanButton( page ) ).toBeDisabled();
+
+		// The REST endpoint refuses too, for a page opened before the switch.
+		const refused = await requestUtils
+			.rest( {
+				method: 'POST',
+				path: '/php-compat/v1/scan-batch',
+				data: { type: 'plugin', slug: 'passing-plugin', limit: 0 },
+			} )
+			.catch( ( error ) => error );
+		expect( refused.code ).toBe( 'phpcompat_scanning_disabled' );
+
+		// Site Health doesn't send people to a scan they can't run.
+		await admin.visitAdminPage( 'site-health.php' );
+		await expect( page.locator( '.health-check-body' ) ).toContainText(
+			message
+		);
+	} );
+
+	test( 'clears results and starts over', async ( { admin, page } ) => {
+		await mockScanner( page );
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+		await scanFinished( page );
+		await expect( results( page, 'problems' ) ).toHaveCount( 1 );
+
+		await page.getByRole( 'link', { name: 'Clear results' } ).click();
+
+		await expect( results( page, 'problems' ) ).toHaveCount( 0 );
+		await expect(
+			page.getByRole( 'link', { name: 'Download Report' } )
+		).toBeHidden();
+		await expect( scanButton( page ) ).toBeEnabled();
+	} );
+
+	test( 'shows results as raw text', async ( { admin, page } ) => {
+		await mockScanner( page );
+		await admin.visitAdminPage( ...PAGE );
+		await scanButton( page ).click();
+		await scanFinished( page );
+
+		const raw = page.getByRole( 'checkbox', {
+			name: 'View results as raw text',
+		} );
+		const text = page.getByRole( 'textbox', {
+			name: 'Scan results as text',
+		} );
+		await raw.check();
+		await expect( text ).toBeVisible();
+		await expect( text ).toHaveValue( /Problem Plugin/ );
+		await expect( text ).toHaveValue( /Example problem on PHP 8\.0/ );
+		await expect( page.locator( '#wpe_pcc_results' ) ).toBeHidden();
+
+		await raw.uncheck();
+		await expect( text ).toBeHidden();
+		await expect( page.locator( '#wpe_pcc_results' ) ).toBeVisible();
 	} );
 
 	test( 'shows progress while scanning (#42)', async ( { admin, page } ) => {

@@ -11,16 +11,15 @@ import {
 	itemFacts,
 	pageLang,
 	playgroundUrl,
+	problemTables,
+	problemTypeLabel,
 	recommendation,
 	reportFacts,
 	sortItems,
-	splitProblems,
-	groupByMessage,
 	statusLabels,
 	statusTiles,
 	typeLabel,
 	versionList,
-	versionsWith,
 } from './report-model';
 
 /**
@@ -83,27 +82,12 @@ export function buildReportHtml( items, meta ) {
 			: ` <span class="muted">(${ esc(
 					__( 'inactive', 'php-compatibility-checker' )
 				) })</span>`;
-	const typeCell = ( row ) =>
-		esc(
-			'WARNING' === row.type
-				? __( 'Warning', 'php-compatibility-checker' )
-				: __( 'Error', 'php-compatibility-checker' )
-		);
+	const typeCell = ( row ) => esc( problemTypeLabel( row.type ) );
 
 	const problemSections = problemItems
 		.map( ( item, index ) => {
-			const fails = versionsWith( item, 'fail' ).join( ', ' );
-			const { files, libraries } = splitProblems( item );
+			const { groups, libraries, showPhp } = problemTables( item );
 			// The item's own code: one table, a row naming each file above its problems.
-			const groups = files.map( ( file ) => ( {
-				file: file.file,
-				rows: groupByMessage( file.rows ),
-			} ) );
-			const showPhp = groups.some( ( group ) =>
-				group.rows.some(
-					( row ) => row.versions.join( ', ' ) !== fails
-				)
-			);
 			const fileTables = groups.length
 				? `
 				<table>

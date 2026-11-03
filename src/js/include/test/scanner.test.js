@@ -374,6 +374,23 @@ describe( 'scanItem', () => {
 		expect( apiFetch ).toHaveBeenCalledTimes( 1 );
 	} );
 
+	it( 'stops the whole scan when the host turned scanning off', async () => {
+		server( files( 3 ), {
+			fail: () =>
+				response( 403, {
+					code: 'phpcompat_scanning_disabled',
+					message: 'Scanning from this page is turned off.',
+				} ),
+		} );
+
+		const error = await settle( scanItem( job ) ).catch( ( e ) => e );
+		expect( error.message ).toBe(
+			'Scanning from this page is turned off.'
+		);
+		expect( error.status ).toBe( 'busy' );
+		expect( apiFetch ).toHaveBeenCalledTimes( 1 );
+	} );
+
 	it( 'fails at once on errors retrying cannot fix', async () => {
 		server( files( 3 ), {
 			fail: () =>
