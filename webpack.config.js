@@ -1,5 +1,6 @@
 const defaultConfig = require("@wordpress/scripts/config/webpack.config");
 const path = require("path");
+const webpack = require("webpack");
 
 // Extend the @wordpress/scripts config without webpack-merge: merging appends
 // arrays, which ran every default plugin twice and produced an asset file with
@@ -15,11 +16,12 @@ module.exports = {
     // Browser engine (experimental): PHP in WebAssembly, in a Web Worker.
     "wasm-worker": path.resolve(process.cwd(), "src/js", "wasm-worker.js"),
   },
-  resolve: {
-    ...defaultConfig.resolve,
-    // @php-wasm/universal has a Node-only path (worker_threads) the browser never takes.
-    fallback: { ...(defaultConfig.resolve?.fallback || {}), worker_threads: false },
-  },
+  plugins: [
+    ...defaultConfig.plugins,
+    // @php-wasm/universal has a Node-only path (worker_threads) the browser
+    // never takes; leave it out instead of emitting an empty chunk for it.
+    new webpack.IgnorePlugin({ resourceRegExp: /^worker_threads$/ }),
+  ],
   performance: {
     ...defaultConfig.performance,
     // The PDF chunk is large but only loads when someone downloads a PDF.

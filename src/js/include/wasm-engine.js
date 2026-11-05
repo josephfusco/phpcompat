@@ -112,12 +112,15 @@ async function boot( config ) {
 		{ timeout: INIT_TIMEOUT_MS }
 	);
 
-	return {
+	const result = {
 		...timings,
 		bundleMs: Math.round( t1 - t0 ),
 		cachedBundle,
 		totalMs: Math.round( performance.now() - t0 ),
 	};
+	// eslint-disable-next-line no-console
+	console.info( 'PHP Compatibility Checker: browser engine ready', result );
+	return result;
 }
 
 /**

@@ -1,9 +1,10 @@
 /**
  * Scans plugins and themes on this site, a small batch of files per request.
  *
- * PHP_CodeSniffer with PHPCompatibilityWP ships in the plugin and runs on the
- * site's own PHP. Nothing is loaded from other sites. A scan is a resumable
- * batch job, built to stay inside shared-hosting limits:
+ * PHP_CodeSniffer with PHPCompatibilityWP ships in the plugin. It runs on the
+ * site's own PHP, or (browser engine, see wasm-engine.js) in this browser on
+ * files the site sends, so the site only reads them. Either way a scan is a
+ * resumable batch job, built to stay inside shared-hosting limits:
  *
  * - One request at a time, so a scan never holds more than one PHP worker.
  * - Pacing: after a slow request (a busy host, often disk I/O on shared
@@ -94,10 +95,9 @@ const BROWSER_CODES = [
 const MAX_RESTARTS = 2;
 
 let batchSize = START_BATCH;
-// Set once per page when the browser engine can't start in "auto" mode, so
-// later items go straight to the server.
+// Set once per page when the browser engine fails in "auto" mode, so later
+// items go straight to the server.
 let browserFailed = false;
-let browserReported = false;
 let controller = new AbortController();
 // Holds the site's scan lock for one scan (see Scan_Lock); '' between scans.
 let scanToken = '';
@@ -238,31 +238,9 @@ async function scanOnce( job, onStatus, signal ) {
 	const total = plan.total || 0;
 	const fingerprint = plan.fingerprint || '';
 	let engine = total ? await chooseEngine( onStatus ) : 'server';
-	// "auto" only: when the browser fails partway, scan the rest on the server.
-	const fallBackToServer = ( error ) => {
-		if ( 'browser' !== engine || 'auto' !== wantedEngine( config() ) ) {
-			return false;
-		}
-		browserFailed = true;
-		engine = 'server';
-		timing.engine = 'server (fell back from browser)';
-		// eslint-disable-next-line no-console
-		console.warn(
-			'PHP Compatibility Checker: scanning on the server instead of in the browser:',
-			error.message
-		);
-		return true;
-	};
 	const versions = config().phpVersions || [];
-	// Measured for the spike: where the time goes, per item.
-	const timing = {
-		engine,
-		files: total,
-		requestMs: 0,
-		wasmMs: 0,
-		batches: 0,
-	};
-	const itemStarted = Date.now();
+	// Where the time goes, per item (logged at the end; for the experiment).
+	const timing = { requestMs: 0, wasmMs: 0 };
 	const report = { compatible: [], incompatible: [], versions: {} };
 	// A host can answer with a whole report (wpephpcompat_pre_scan_report).
 	mergeReport( report, plan.report || {} );
@@ -346,12 +324,14 @@ async function scanOnce( job, onStatus, signal ) {
 				response.scanned = result.checked;
 			}
 		} catch ( error ) {
-			// The same batch again, on the server.
+			// "auto": the browser failed, so this batch and the rest go to the server.
 			if (
+				'browser' === engine &&
 				error instanceof BatchError &&
 				BROWSER_CODES.includes( error.code ) &&
-				fallBackToServer( error )
+				'auto' === wantedEngine( config() )
 			) {
+				engine = switchToServer( error );
 				continue;
 			}
 			if ( ! ( error instanceof BatchError ) || 'batch' !== error.kind ) {
@@ -398,7 +378,6 @@ async function scanOnce( job, onStatus, signal ) {
 		failures = 0;
 		fileFailures = 0;
 		batches++;
-		timing.batches++;
 		const took = Date.now() - batchStarted;
 		batchSize = nextBatchSize( limit, took );
 		checked += response.scanned || 0;
@@ -421,7 +400,9 @@ async function scanOnce( job, onStatus, signal ) {
 	// eslint-disable-next-line no-console
 	console.info( `PHP Compatibility Checker: ${ job.slug } on ${ engine }`, {
 		...timing,
-		totalMs: Date.now() - itemStarted,
+		files: total,
+		batches,
+		totalMs: Date.now() - started,
 	} );
 
 	finishReport( report, versions );
@@ -455,15 +436,7 @@ async function chooseEngine( onStatus ) {
 		)
 	);
 	try {
-		const timings = await startBrowserEngine( config() );
-		if ( ! browserReported ) {
-			browserReported = true;
-			// eslint-disable-next-line no-console
-			console.info(
-				'PHP Compatibility Checker: browser engine ready',
-				timings
-			);
-		}
+		await startBrowserEngine( config() );
 		return 'browser';
 	} catch ( error ) {
 		if ( 'browser' === wanted ) {
@@ -478,14 +451,24 @@ async function chooseEngine( onStatus ) {
 				)
 			);
 		}
-		browserFailed = true;
-		// eslint-disable-next-line no-console
-		console.warn(
-			'PHP Compatibility Checker: scanning on the server instead of in the browser:',
-			error.message
-		);
-		return 'server';
+		return switchToServer( error );
 	}
+}
+
+/**
+ * The browser engine failed in "auto" mode: scan on the server from now on.
+ *
+ * @param {Error} error What went wrong.
+ * @return {string} "server".
+ */
+function switchToServer( error ) {
+	browserFailed = true;
+	// eslint-disable-next-line no-console
+	console.warn(
+		'PHP Compatibility Checker: scanning on the server instead of in the browser:',
+		error.message
+	);
+	return 'server';
 }
 
 /**

@@ -340,9 +340,10 @@ class Rest_Controller {
 		// Browser engine: hand over the files; the browser scans them.
 		if ( 'browser' === $request['engine'] ) {
 			if ( ! Scanner_Bundle::can_read_code() ) {
-				return new WP_Error( 'phpcompat_browser_engine_denied', __( 'Scanning in the browser isn\'t available to you on this network. Scanning on the server instead.', 'php-compatibility-checker' ), array( 'status' => 403 ) );
+				return self::browser_denied();
 			}
-			$response          = $this->batch_response( array( 'versions' => array() ), count( $batch['files'] ), $batch['next'], null === $batch['next'] ? '' : $list['files'][ $batch['next'] ], $list );
+			$next_path         = null === $batch['next'] ? '' : $list['files'][ $batch['next'] ];
+			$response          = $this->batch_response( array( 'versions' => array() ), count( $batch['files'] ), $batch['next'], $next_path, $list );
 			$response['files'] = self::read_files( $base, $batch['files'] );
 			return new WP_REST_Response( $response );
 		}
@@ -383,16 +384,28 @@ class Rest_Controller {
 	 */
 	public static function read_files( string $base, array $paths ): array {
 		$real  = realpath( $base );
-		$files = array();
+		$files = array_fill_keys( $paths, null );
+		if ( false === $real ) {
+			return $files;
+		}
 
 		foreach ( $paths as $relative ) {
-			$path = false !== $real ? realpath( $real . '/' . $relative ) : false;
+			$path = realpath( $real . '/' . $relative );
 			$data = false !== $path && is_file( $path ) && Scanner::is_inside( $path, $real ) ? file_get_contents( $path ) : false; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file.
 
 			$files[ $relative ] = false === $data ? null : base64_encode( $data ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Binary-safe transport of source files, not obfuscation.
 		}
 
 		return $files;
+	}
+
+	/**
+	 * The browser engine isn't for this user (see Scanner_Bundle::can_read_code()).
+	 *
+	 * @return WP_Error
+	 */
+	private static function browser_denied(): WP_Error {
+		return new WP_Error( 'phpcompat_browser_engine_denied', __( 'Scanning in the browser isn\'t available to you on this network.', 'php-compatibility-checker' ), array( 'status' => 403 ) );
 	}
 
 	/**
@@ -406,7 +419,7 @@ class Rest_Controller {
 	 */
 	public function scanner_bundle( WP_REST_Request $request ) {
 		if ( ! Scanner_Bundle::can_read_code() ) {
-			return new WP_Error( 'phpcompat_browser_engine_denied', __( 'Scanning in the browser isn\'t available to you on this network.', 'php-compatibility-checker' ), array( 'status' => 403 ) );
+			return self::browser_denied();
 		}
 		if ( ! Scanner_Bundle::scanning_enabled() ) {
 			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );

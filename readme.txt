@@ -16,7 +16,7 @@ The WP Engine PHP Compatibility Checker can be used by any WordPress website on 
 
 It checks your plugins and themes with [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), the PHP community's standard compatibility checker for [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), using its WordPress ruleset, [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP). Each problem lists the file and line of the code and why it breaks on that version of PHP. Problems are categorized into errors (the code breaks) and warnings (deprecated, but still runs). The plugin also suggests updates to themes and plugins, as a new version may offer compatible code.
 
-**Built for shared hosting.** The scan runs on your site a few files at a time, one short request after another, so it stays within your host's time and memory limits. No code is sent to any other service. Results are kept, and a plugin or theme is only checked again when its files change.
+**Built for shared hosting.** The scan runs on your site a few files at a time, one short request after another, so it stays within your host's time and memory limits. Where your browser can, it does the checking itself (experimental), and your site only reads the files. No code is sent to any other service. Results are kept, and a plugin or theme is only checked again when its files change.
 
 **This plugin does not execute your theme and plugin code, as such this plugin cannot detect runtime compatibility issues.**
 
@@ -92,6 +92,7 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 10. What external services does this plugin use? =
 
+    * [jsDelivr](https://www.jsdelivr.com): when scanning in your browser (experimental), the browser downloads PHP for WebAssembly (the @php-wasm/web-8-3 package, about 6.5 MB, cached afterwards) from cdn.jsdelivr.net. No site data or code is sent; your plugins' and themes' files stay between your site and your browser. Hosts can serve their own copy with the wpephpcompat_wasm_base_url filter, or turn browser scanning off with wpephpcompat_scan_engine. See the [jsDelivr privacy policy](https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net).
     * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
 
 == Screenshots ==

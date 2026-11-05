@@ -22,8 +22,8 @@ import { jspi } from 'wasm-feature-detect';
 const SCANNER_DIR = '/scanner';
 const ITEM_DIR = '/scan/item';
 
-/** Settings from init, kept to start PHP again after a crash. */
-let settings = null;
+/** The scanner's files (path => bytes), kept to start PHP again after a crash. */
+let scannerFiles = null;
 /** The loaded Emscripten module for PHP, reused for restarts. */
 let loader = null;
 let asyncMode = 'asyncify';
@@ -83,7 +83,7 @@ async function init( { wasmBaseUrl, bundle, sha256 } ) {
 	loader = await import(
 		/* webpackIgnore: true */ `${ wasmBaseUrl }${ asyncMode }/php_8_3.js`
 	);
-	settings = { files };
+	scannerFiles = files;
 	await start();
 
 	return {
@@ -103,7 +103,7 @@ async function start() {
 		processId: 1,
 	} );
 	php = new PHP( runtime );
-	Object.entries( settings.files ).forEach( ( [ relative, bytes ] ) => {
+	Object.entries( scannerFiles ).forEach( ( [ relative, bytes ] ) => {
 		write( `${ SCANNER_DIR }/${ relative }`, bytes );
 	} );
 }
