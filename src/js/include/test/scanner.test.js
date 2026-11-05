@@ -1,19 +1,17 @@
 /**
  * Unit tests for batched scanning: sizing, retries, skipping, merging.
+ *
+ * The site (apiFetch) hands out files; PHP in the browser (wasm-engine) is
+ * replaced by a fake that reports an error on PHP 8.0 for "failing" files.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 globalThis.window = globalThis.window || globalThis;
 const apiFetch = vi.fn();
 vi.mock( '@wordpress/api-fetch', () => ( { default: apiFetch } ) );
-// The browser engine (PHP in WebAssembly) is replaced; wantedEngine() is real.
 const startBrowserEngine = vi.fn();
 const scanInBrowser = vi.fn();
-vi.mock( '../wasm-engine', async ( importOriginal ) => ( {
-	...( await importOriginal() ),
-	startBrowserEngine,
-	scanInBrowser,
-} ) );
+vi.mock( '../wasm-engine', () => ( { startBrowserEngine, scanInBrowser } ) );
 
 const {
 	scanItem,
@@ -74,7 +72,7 @@ function batchReport( failing = [] ) {
 }
 
 /**
- * A fake /scan-batch over a list of files.
+ * A fake /scan-batch over a list of files, and a fake PHP in the browser.
  *
  * @param {string[]}                         files           Paths.
  * @param {Object}                           options
@@ -93,8 +91,9 @@ function server( files, { fail = () => null, failing = [] } = {} ) {
 		const next = data.cursor + batch.length;
 		return response( 200, {
 			cached: false,
-			report: batchReport(
-				batch.filter( ( f ) => failing.includes( f ) )
+			report: { versions: {} },
+			files: Object.fromEntries(
+				batch.map( ( f ) => [ f, 'PD9waHA=' ] )
 			),
 			scanned: batch.length,
 			next: next < files.length ? next : null,
@@ -104,6 +103,16 @@ function server( files, { fail = () => null, failing = [] } = {} ) {
 			skipped: [],
 			truncated: false,
 		} );
+	} );
+	scanInBrowser.mockImplementation( async ( batch ) => {
+		const paths = Object.keys( batch );
+		return {
+			report: batchReport(
+				paths.filter( ( f ) => failing.includes( f ) )
+			),
+			checked: paths.length,
+			ms: 1,
+		};
 	} );
 	return calls;
 }
@@ -132,6 +141,8 @@ beforeEach( () => {
 	vi.useFakeTimers();
 	window.checkerList = { scanner: { phpVersions: VERSIONS, ruleset: 'r' } };
 	apiFetch.mockReset();
+	startBrowserEngine.mockReset().mockResolvedValue( {} );
+	scanInBrowser.mockReset();
 	cancelScans();
 } );
 
@@ -428,88 +439,61 @@ describe( 'scanItem', () => {
 	} );
 } );
 
-describe( 'browser engine', () => {
-	/**
-	 * A fake /scan-batch that hands out files (engine "browser") or scans them.
-	 *
-	 * @param {string[]} list Paths.
-	 */
-	function browserServer( list ) {
-		const calls = [];
-		apiFetch.mockImplementation( async ( { data } ) => {
-			calls.push( { ...data } );
-			const batch = list.slice( data.cursor, data.cursor + data.limit );
-			const next = data.cursor + batch.length;
-			const body = {
-				cached: false,
-				report:
-					'browser' === data.engine
-						? { versions: {} }
-						: batchReport( batch ),
-				scanned: batch.length,
-				next: next < list.length ? next : null,
-				next_path: next < list.length ? list[ next ] : '',
-				total: list.length,
-				fingerprint: 'abc',
-				skipped: [],
-				truncated: false,
-			};
-			if ( 'browser' === data.engine ) {
-				body.files = Object.fromEntries(
-					batch.map( ( f ) => [ f, 'PD9waHA=' ] )
-				);
-			}
-			return response( 200, body );
-		} );
-		return calls;
-	}
-
-	beforeEach( () => {
-		startBrowserEngine.mockReset().mockResolvedValue( {} );
-		scanInBrowser.mockReset();
-	} );
-
-	it( 'scans the files the site sends in the browser', async () => {
-		window.checkerList.scanner.engine = 'browser';
+describe( 'PHP in the browser', () => {
+	it( 'checks the files the site sends', async () => {
 		const list = files( 25 );
-		const calls = browserServer( list );
-		scanInBrowser.mockImplementation( async ( batch ) => ( {
-			report: batchReport( Object.keys( batch ) ),
-			checked: Object.keys( batch ).length,
-			ms: 1,
-		} ) );
+		server( list );
 
-		const result = await settle( scanItem( job ) );
+		await settle( scanItem( job ) );
 
-		expect(
-			calls.slice( 1 ).every( ( c ) => 'browser' === c.engine )
-		).toBe( true );
-		const scanned = scanInBrowser.mock.calls.flatMap( ( [ batch ] ) =>
+		const checked = scanInBrowser.mock.calls.flatMap( ( [ batch ] ) =>
 			Object.keys( batch )
 		);
-		expect( scanned ).toEqual( list );
-		expect( result.report.versions[ '8.0' ].totals.errors ).toBe( 25 );
+		expect( checked ).toEqual( list );
 	} );
 
-	it( 'in "auto", scans on the server when the browser fails', async () => {
-		window.checkerList.scanner.engine = 'auto';
-		const list = files( 25 );
-		const calls = browserServer( list );
-		scanInBrowser.mockRejectedValue(
-			new Error( 'PHP in the browser stopped responding.' )
+	it( 'stops the whole scan when PHP cannot start in this browser', async () => {
+		server( files( 5 ) );
+		startBrowserEngine.mockRejectedValue(
+			new Error( 'Failed to fetch dynamically imported module' )
 		);
+
+		const error = await settle( scanItem( job ) ).catch( ( e ) => e );
+
+		expect( error.status ).toBe( 'busy' );
+		expect( error.message ).toMatch(
+			/couldn't start in this browser.*Failed to fetch/
+		);
+		expect( scanInBrowser ).not.toHaveBeenCalled();
+	} );
+
+	it( 'skips a file that crashes PHP in the browser, and checks the rest', async () => {
+		const list = files( 12 );
+		server( list );
+		const fake = scanInBrowser.getMockImplementation();
+		scanInBrowser.mockImplementation( async ( batch, ...rest ) => {
+			if ( 'f007.php' in batch ) {
+				throw new Error( 'memory access out of bounds' );
+			}
+			return fake( batch, ...rest );
+		} );
 
 		const result = await settle( scanItem( job ) );
 
-		const engines = calls.slice( 1 ).map( ( c ) => c.engine );
-		expect( engines[ 0 ] ).toBe( 'browser' );
-		expect( engines.slice( 1 ).every( ( e ) => 'server' === e ) ).toBe(
-			true
+		expect( result.report.skipped ).toEqual( [ 'f007.php' ] );
+	} );
+
+	it( 'does not load PHP for an item with a stored result', async () => {
+		apiFetch.mockResolvedValue(
+			response( 200, {
+				cached: true,
+				result: { report: { compatible: VERSIONS }, source: 'local' },
+			} )
 		);
-		// The failed batch was requested again from the server: every file counted once.
-		expect( calls[ 2 ].cursor ).toBe( calls[ 1 ].cursor );
-		expect( result.report.versions[ '8.0' ].totals.errors ).toBe( 25 );
-		expect( result.report.skipped ).toEqual( [] );
+
+		await settle( scanItem( job ) );
+
+		expect( startBrowserEngine ).not.toHaveBeenCalled();
 	} );
 } );
 

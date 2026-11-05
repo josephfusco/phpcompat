@@ -1,7 +1,7 @@
 /**
- * Browser engine (experimental): scans in PHP compiled to WebAssembly, in a
- * Web Worker (see ../wasm-worker.js). The site only reads files; the CPU
- * work happens on this computer.
+ * The scanner in this browser: PHP compiled to WebAssembly, in a Web Worker
+ * (see ../wasm-worker.js). The site only reads files; the CPU work happens
+ * on this computer.
  *
  * Started once per page. The scanner's files are fetched from the site once
  * and kept in the browser's Cache Storage under the build's SHA-256, so they
@@ -10,7 +10,7 @@
 import apiFetch from '@wordpress/api-fetch';
 
 const CACHE_NAME = 'phpcompat-scanner';
-/** Longest wait for PHP to load (includes downloading about 6.5 MB). */
+/** Longest wait for PHP to load (includes downloading its 18 MB .wasm from the site). */
 const INIT_TIMEOUT_MS = 120000;
 /** Longest wait for one batch; past this the worker is assumed stuck or dead. */
 const SCAN_TIMEOUT_MS = 120000;
@@ -21,24 +21,7 @@ let nextId = 1;
 const pending = new Map();
 
 /**
- * Where scans run on this page: "server", "browser", or "auto". A
- * ?phpcompat_engine= query argument overrides the site's setting, for testing.
- *
- * @param {Object} config Scanner settings (Scanner_Bundle::browser_config()).
- * @return {string} Engine.
- */
-export function wantedEngine( config ) {
-	const override = new URLSearchParams(
-		globalThis.location?.search || ''
-	).get( 'phpcompat_engine' );
-	const engine = override || config.engine || 'server';
-	return [ 'auto', 'browser', 'server' ].includes( engine )
-		? engine
-		: 'server';
-}
-
-/**
- * Start the browser engine (once per page; later calls share the first).
+ * Start PHP and the scanner (once per page; later calls share the first).
  *
  * @param {Object} config Scanner settings.
  * @return {Promise<Object>} Timings, once PHP and the scanner are ready.
@@ -112,15 +95,12 @@ async function boot( config ) {
 		{ timeout: INIT_TIMEOUT_MS }
 	);
 
-	const result = {
+	return {
 		...timings,
 		bundleMs: Math.round( t1 - t0 ),
 		cachedBundle,
 		totalMs: Math.round( performance.now() - t0 ),
 	};
-	// eslint-disable-next-line no-console
-	console.info( 'PHP Compatibility Checker: browser engine ready', result );
-	return result;
 }
 
 /**

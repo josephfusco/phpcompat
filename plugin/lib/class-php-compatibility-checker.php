@@ -379,7 +379,7 @@ class PHP_Compatibility_Checker {
 					<?php
 					printf(
 						/* translators: 1: PHPCompatibility URL, 2: list of PHP versions. */
-						wp_kses_post( __( 'This tool checks your plugins and themes with <a target="_blank" href="%1$s">PHPCompatibility</a> against PHP %2$s. Each problem shows the file, line, and why it breaks on that PHP version. The check runs on this site a few files at a time, so it stays within your host\'s limits, and no code is sent anywhere else. A plugin or theme is only checked again when its files change. If something fails, check for an update first: a newer version may already be compatible.', 'php-compatibility-checker' ) ),
+						wp_kses_post( __( 'This tool checks your plugins and themes with <a target="_blank" href="%1$s">PHPCompatibility</a> against PHP %2$s. Each problem shows the file, line, and why it breaks on that PHP version. The check runs in your browser on files this site sends a few at a time, so it barely uses your host\'s resources, and no code is sent anywhere else. A plugin or theme is only checked again when its files change. If something fails, check for an update first: a newer version may already be compatible.', 'php-compatibility-checker' ) ),
 						esc_url( 'https://github.com/PHPCompatibility/PHPCompatibilityWP' ),
 						esc_html( implode( ', ', Scanner_Bundle::PHP_VERSIONS ) )
 					);

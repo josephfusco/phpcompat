@@ -10,12 +10,12 @@ declare( strict_types=1 );
 namespace WPEngine_PHPCompat;
 
 /**
- * Describes build/scanner/ and runs it in this PHP process.
+ * Describes build/scanner/, and runs it in this PHP process for WP-CLI.
  *
  * The same files run in two places, so results are identical:
- * - from the scan page, a few files per request (Rest_Controller::scan_batch()),
- *   so each request stays short on shared hosts;
- * - under WP-CLI, which has no request time limit.
+ * - on the scan page, in the admin's browser (PHP compiled to WebAssembly,
+ *   see src/js/wasm-worker.js), on files the site sends a batch at a time;
+ * - under WP-CLI, on the server, which has no request time limit.
  *
  * They're plain PHP files in the plugin, not an archive, because WordPress.org
  * doesn't accept compressed files in plugins.
@@ -150,52 +150,27 @@ class Scanner_Bundle {
 	}
 
 	/**
-	 * What people see when scanning is turned off.
+	 * What people see when they can't scan from the scan page.
 	 *
 	 * @return string
 	 */
 	public static function disabled_message(): string {
+		if ( self::scanning_enabled() && ! self::can_read_code() ) {
+			return __( 'On a network, only super admins can scan from this page, because the scan reads plugin and theme code in your browser. You can still scan with WP-CLI: wp php-compat scan.', 'php-compatibility-checker' );
+		}
 		return __( 'Scanning from this page is turned off on this site, usually by the host. You can still scan with WP-CLI: wp php-compat scan.', 'php-compatibility-checker' );
 	}
 
 	/**
-	 * The php-wasm build the browser engine loads: @php-wasm/web-8-3, the same
+	 * The php-wasm build the browser loads: @php-wasm/web-8-3, the same
 	 * version as the @php-wasm/universal bundled in build/wasm-worker.js.
 	 */
 	const WASM_VERSION = '3.1.62';
 
 	/**
-	 * Where scans run (experimental):
-	 * - "server": on this site's PHP, a batch per request.
-	 * - "browser": in the admin's browser, in PHP compiled to WebAssembly; the
-	 *   site only reads files.
-	 * - "auto": the browser when it can load PHP, otherwise the server.
-	 *
-	 * Always "server" on multisite for anyone but super admins: the browser
-	 * engine sends plugin source to the browser, and subsite admins can't
-	 * otherwise read network-installed plugin code.
-	 *
-	 * @return string
-	 */
-	public static function engine(): string {
-		if ( ! self::can_read_code() ) {
-			return 'server';
-		}
-
-		/**
-		 * Filters where scans from the scan page run.
-		 *
-		 * @since 2.0.0
-		 *
-		 * @param string $engine "auto", "browser", or "server".
-		 */
-		$engine = (string) apply_filters( 'wpephpcompat_scan_engine', 'auto' );
-
-		return in_array( $engine, array( 'auto', 'browser', 'server' ), true ) ? $engine : 'auto';
-	}
-
-	/**
-	 * Whether the current user may receive plugin and theme source (browser engine).
+	 * Whether the current user may receive plugin and theme source, which a
+	 * scan from the scan page sends to the browser. On multisite only super
+	 * admins: subsite admins can't otherwise read network plugin code.
 	 *
 	 * @return bool
 	 */
@@ -217,8 +192,8 @@ class Scanner_Bundle {
 	}
 
 	/**
-	 * Base URL of the php-wasm loader and .wasm file for the browser engine
-	 * (about 6.5 MB compressed, cached by the browser).
+	 * Base URL of the php-wasm loader and .wasm file the browser scans with
+	 * (bundled in build/php-wasm/, cached by the browser).
 	 *
 	 * @return string
 	 */
@@ -244,9 +219,8 @@ class Scanner_Bundle {
 			'ruleset'         => self::ruleset(),
 			'tools'           => self::tools(),
 			'phpVersions'     => self::PHP_VERSIONS,
-			'enabled'         => self::scanning_enabled(),
+			'enabled'         => self::scanning_enabled() && self::can_read_code(),
 			'disabledMessage' => self::disabled_message(),
-			'engine'          => self::engine(),
 			'wasmBaseUrl'     => self::wasm_base_url(),
 			'workerUrl'       => self::worker_url(),
 			'sha256'          => (string) ( self::manifest()['sha256'] ?? '' ),
@@ -266,36 +240,6 @@ class Scanner_Bundle {
 		self::load();
 
 		return \WPEngine_PHPCompat\Bundle\scan_files( $base, $files, $versions );
-	}
-
-	/**
-	 * Pass 1 for some files: which have a problem on any PHP version checked.
-	 * With a deadline, it stops after the file that passes it (at least one file).
-	 *
-	 * @param string     $base     Directory the paths are relative to.
-	 * @param string[]   $files    Relative paths.
-	 * @param float|null $deadline Optional. microtime( true ) to stop at.
-	 * @return array { @type string[] $flagged Absolute paths of flagged files. @type int $checked Files checked, from the start. }
-	 * @throws \RuntimeException When the scanner is missing.
-	 */
-	public static function flag_files( string $base, array $files, ?float $deadline = null ): array {
-		self::load();
-
-		return \WPEngine_PHPCompat\Bundle\flag_files( $base, $files, self::PHP_VERSIONS, $deadline );
-	}
-
-	/**
-	 * Pass 2: the report for each PHP version, for flagged files only.
-	 *
-	 * @param string   $base    Directory paths in the report are relative to.
-	 * @param string[] $flagged Absolute paths from flag_files().
-	 * @return array Report (see Results::sanitize_report()).
-	 * @throws \RuntimeException When the scanner is missing.
-	 */
-	public static function report_flagged( string $base, array $flagged ): array {
-		self::load();
-
-		return \WPEngine_PHPCompat\Bundle\report_flagged( $base, $flagged, self::PHP_VERSIONS );
 	}
 
 	/**

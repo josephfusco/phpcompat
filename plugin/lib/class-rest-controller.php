@@ -17,19 +17,21 @@ use WP_REST_Server;
 /**
  * Routes under php-compat/v1:
  *
- * - POST /scan-batch Scan the next few PHP files of one plugin or theme, or
- *                    (engine "browser") send them to the browser to scan.
- * - GET /scanner-bundle The scanner's files, for the browser engine.
- * - POST /results    Store the merged result of a finished scan.
- * - DELETE /scan-lock Let go of the site's scan lock when a scan ends.
+ * - POST /scan-batch     The next few PHP files of one plugin or theme, for the browser to scan.
+ * - GET /scanner-bundle  The scanner's own files, for the browser.
+ * - POST /results        Store the merged result of a finished scan.
+ * - DELETE /scan-lock    Let go of the site's scan lock when a scan ends.
  *
- * Scanning is a resumable batch job, driven by the browser so no request runs
- * long enough to hit a shared host's time, memory, or worker limits:
+ * Scans from the scan page run in the admin's browser: it runs the plugin's
+ * runner.php in PHP compiled to WebAssembly (see src/js/wasm-worker.js). The
+ * site only lists and reads files, so a scan costs it little more than
+ * serving a few small pages. (WP-CLI still scans on the server; see Scanner.)
  *
- * - The browser sends one request at a time, so a scan uses at most one PHP
- *   worker. It sizes each batch to finish in a few seconds, shrinks it after
- *   a slow or failed request, retries with backoff, and skips a file that
- *   fails on its own instead of failing the whole item.
+ * A scan is a resumable batch job driven by the browser:
+ *
+ * - The browser sends one request at a time, sizes each batch to finish in a
+ *   few seconds, retries with backoff, and skips a file that breaks PHP on its
+ *   own instead of failing the whole item.
  * - Each request is also capped here (files, bytes), whatever the browser asks.
  * - The cursor is an index into the item's sorted file list. The list has a
  *   fingerprint (paths, sizes, modification times); if the files change mid-scan,
@@ -37,15 +39,11 @@ use WP_REST_Server;
  * - The fingerprint is stored with the result, so an unchanged item isn't
  *   scanned again: the first request returns the stored result.
  *
- * Browser engine (experimental): the server only reads files. The browser
- * runs the same runner.php in PHP compiled to WebAssembly, so the CPU work of
- * a scan happens on the admin's computer instead of the site's PHP worker.
- *
- * Every route needs the plugin's capability (manage_options). Items are
+ * Every route needs the plugin's capability (manage_options), and on
+ * multisite a super admin (see Scanner_Bundle::can_read_code()). Items are
  * looked up from the installed plugin and theme lists; no path from the
- * request is used to open a file. File contents (browser engine) come only
- * from the item's own file list, the same files an admin can already read in
- * the plugin and theme file editors.
+ * request is used to open a file. File contents come only from the item's own
+ * file list, the same files an admin can already read in the file editors.
  */
 class Rest_Controller {
 
@@ -63,18 +61,6 @@ class Rest_Controller {
 	 * Most bytes of PHP per scan request (at least one file is always scanned).
 	 */
 	const SCAN_MAX_BYTES = 1048576; // 1 MB.
-
-	/**
-	 * Seconds of scanning per request. Past this, the request stops after the
-	 * current chunk of files and the rest wait for the next request.
-	 */
-	const SCAN_TIME_BUDGET = 3.0;
-
-	/**
-	 * Share of the budget for pass 1; the rest is left for pass 2, which only
-	 * checks the files pass 1 flagged.
-	 */
-	const PASS_ONE_SHARE = 0.6;
 
 	/**
 	 * Default files per scan request, when the browser doesn't say.
@@ -156,12 +142,6 @@ class Rest_Controller {
 						),
 						'fingerprint' => $fingerprint,
 						'scan_token'  => $scan_token,
-						// "browser": send the batch's files instead of scanning them here.
-						'engine'      => array(
-							'type'    => 'string',
-							'enum'    => array( 'server', 'browser' ),
-							'default' => 'server',
-						),
 					)
 				),
 			)
@@ -241,7 +221,7 @@ class Rest_Controller {
 	}
 
 	/**
-	 * POST /scan-batch: scan the next batch of an item's PHP files.
+	 * POST /scan-batch: the next batch of an item's PHP files, for the browser to scan.
 	 *
 	 * @param WP_REST_Request $request Request.
 	 * @return WP_REST_Response|WP_Error {
@@ -250,7 +230,8 @@ class Rest_Controller {
 	 *     @type bool     $cached      True when the item is unchanged since its stored
 	 *                                 result; then only $result is set.
 	 *     @type array    $result      The stored result (when cached).
-	 *     @type array    $report      Report for this batch (see Results::sanitize_report()).
+	 *     @type array    $report      Empty, or a whole report from wpephpcompat_pre_scan_report.
+	 *     @type array    $files       Relative path => base64 contents (null: unreadable).
 	 *     @type int      $scanned     Files in this batch.
 	 *     @type int|null $next        Cursor for the next batch, or null when done.
 	 *     @type string   $next_path   Path of the file at $next, so the browser can name it if it has to skip it.
@@ -262,9 +243,10 @@ class Rest_Controller {
 	 * }
 	 */
 	public function scan_batch( WP_REST_Request $request ) {
-		// The host turned scanning off (see Scanner_Bundle::scanning_enabled()).
-		if ( ! Scanner_Bundle::scanning_enabled() ) {
-			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );
+		// The host turned scanning off, or this user can't receive plugin source.
+		$refusal = self::refusal();
+		if ( $refusal ) {
+			return $refusal;
 		}
 
 		$item = $this->find_item( (string) $request['type'], (string) $request['slug'] );
@@ -274,8 +256,8 @@ class Rest_Controller {
 
 		$cursor = (int) $request['cursor'];
 
-		// One scan at a time per site, so a second admin or tab doesn't keep a
-		// second PHP worker busy.
+		// One scan at a time per site, so a second admin or tab doesn't add a
+		// second stream of requests.
 		$token = (string) $request['scan_token'];
 		if ( '' !== $token ) {
 			$other = ( new Scan_Lock() )->acquire( $token, get_current_user_id() );
@@ -334,43 +316,28 @@ class Rest_Controller {
 			return new WP_REST_Response( $this->batch_response( array( 'versions' => array() ), 0, $cursor < count( $list['files'] ) ? $cursor : null, $list['files'][ $cursor ] ?? '', $list ) );
 		}
 
-		$base  = is_file( $root ) ? dirname( $root ) : $root;
-		$batch = self::select_batch( $base, $list['files'], $cursor, (int) $request['limit'] );
+		$base      = is_file( $root ) ? dirname( $root ) : $root;
+		$batch     = self::select_batch( $base, $list['files'], $cursor, (int) $request['limit'] );
+		$next_path = null === $batch['next'] ? '' : $list['files'][ $batch['next'] ];
 
-		// Browser engine: hand over the files; the browser scans them.
-		if ( 'browser' === $request['engine'] ) {
-			if ( ! Scanner_Bundle::can_read_code() ) {
-				return self::browser_denied();
-			}
-			$next_path         = null === $batch['next'] ? '' : $list['files'][ $batch['next'] ];
-			$response          = $this->batch_response( array( 'versions' => array() ), count( $batch['files'] ), $batch['next'], $next_path, $list );
-			$response['files'] = self::read_files( $base, $batch['files'] );
-			return new WP_REST_Response( $response );
+		$response          = $this->batch_response( array( 'versions' => array() ), count( $batch['files'] ), $batch['next'], $next_path, $list );
+		$response['files'] = self::read_files( $base, $batch['files'] );
+
+		return new WP_REST_Response( $response );
+	}
+
+	/**
+	 * Why this request may not scan, or null when it may: the host turned
+	 * scanning off (Scanner_Bundle::scanning_enabled()), or the user can't
+	 * receive plugin source (Scanner_Bundle::can_read_code()).
+	 *
+	 * @return WP_Error|null
+	 */
+	private static function refusal(): ?WP_Error {
+		if ( ! Scanner_Bundle::scanning_enabled() || ! Scanner_Bundle::can_read_code() ) {
+			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );
 		}
-
-		$this->prepare_for_scan();
-
-		try {
-			// Pass 1 file by file until most of the time budget is used, then pass 2
-			// (each version) for the flagged files only.
-			$done   = Scanner_Bundle::flag_files( $base, $batch['files'], microtime( true ) + self::SCAN_TIME_BUDGET * self::PASS_ONE_SHARE );
-			$report = Scanner_Bundle::report_flagged( $base, $done['flagged'] );
-		} catch ( \Throwable $e ) {
-			return new WP_Error( 'phpcompat_scan_failed', $e->getMessage(), array( 'status' => 500 ) );
-		}
-
-		// Stopped early for time: the next request starts where this one ended.
-		$next = $done['checked'] < count( $batch['files'] ) ? $cursor + $done['checked'] : $batch['next'];
-
-		return new WP_REST_Response(
-			$this->batch_response(
-				Results::sanitize_report( $report ),
-				$done['checked'],
-				$next,
-				null === $next ? '' : $list['files'][ $next ],
-				$list
-			)
-		);
+		return null;
 	}
 
 	/**
@@ -400,17 +367,8 @@ class Rest_Controller {
 	}
 
 	/**
-	 * The browser engine isn't for this user (see Scanner_Bundle::can_read_code()).
-	 *
-	 * @return WP_Error
-	 */
-	private static function browser_denied(): WP_Error {
-		return new WP_Error( 'phpcompat_browser_engine_denied', __( 'Scanning in the browser isn\'t available to you on this network.', 'php-compatibility-checker' ), array( 'status' => 403 ) );
-	}
-
-	/**
 	 * GET /scanner-bundle: the scanner's files (runner.php and vendor/), for the
-	 * browser engine. They're PHP, so the browser can't fetch them as plain
+	 * browser. They're PHP, so the browser can't fetch them as plain
 	 * URLs (the web server would run them). The browser caches the bundle by
 	 * its SHA-256, so this runs about once per plugin update per browser.
 	 *
@@ -418,11 +376,9 @@ class Rest_Controller {
 	 * @return WP_REST_Response|WP_Error { @type string $ruleset, @type string $sha256, @type array $files Path => base64. }
 	 */
 	public function scanner_bundle( WP_REST_Request $request ) {
-		if ( ! Scanner_Bundle::can_read_code() ) {
-			return self::browser_denied();
-		}
-		if ( ! Scanner_Bundle::scanning_enabled() ) {
-			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );
+		$refusal = self::refusal();
+		if ( $refusal ) {
+			return $refusal;
 		}
 		if ( ! Scanner_Bundle::verify() ) {
 			return new WP_Error( 'phpcompat_no_scanner', __( 'The scanner in this copy of the plugin is missing or incomplete. Reinstall the plugin.', 'php-compatibility-checker' ), array( 'status' => 500 ) );
@@ -488,18 +444,6 @@ class Rest_Controller {
 			'files' => $files,
 			'next'  => $i < $count ? $i : null,
 		);
-	}
-
-	/**
-	 * Give the scan as much room as the host allows. The batch size keeps it
-	 * well inside the limits; this is headroom for a slow moment.
-	 */
-	private function prepare_for_scan(): void {
-		wp_raise_memory_limit( 'admin' );
-
-		if ( function_exists( 'set_time_limit' ) && false === strpos( (string) ini_get( 'disable_functions' ), 'set_time_limit' ) ) {
-			set_time_limit( 60 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Headroom for a slow batch; most take a few seconds.
-		}
 	}
 
 	/**

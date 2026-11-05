@@ -41,7 +41,9 @@ module.exports = {
   ],
   performance: {
     ...defaultConfig.performance,
-    // The PDF chunk is large but only loads when someone downloads a PDF.
-    assetFilter: (file) => !/^pdf\.js/.test(file) && !/\.map$/.test(file),
+    // The PDF chunk is large but only loads when someone downloads a PDF; PHP
+    // for WebAssembly only loads when a scan starts, and is cached after.
+    assetFilter: (file) =>
+      !/^pdf\.js/.test(file) && !/^php-wasm\//.test(file) && !/\.map$/.test(file),
   },
 };

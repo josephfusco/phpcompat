@@ -16,7 +16,7 @@ The WP Engine PHP Compatibility Checker can be used by any WordPress website on 
 
 It checks your plugins and themes with [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility), the PHP community's standard compatibility checker for [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), using its WordPress ruleset, [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP). Each problem lists the file and line of the code and why it breaks on that version of PHP. Problems are categorized into errors (the code breaks) and warnings (deprecated, but still runs). The plugin also suggests updates to themes and plugins, as a new version may offer compatible code.
 
-**Built for shared hosting.** The scan runs on your site a few files at a time, one short request after another, so it stays within your host's time and memory limits. Where your browser can, it does the checking itself (experimental), and your site only reads the files. No code is sent to any other service. Results are kept, and a plugin or theme is only checked again when its files change.
+**Built for shared hosting.** The scan runs in your browser. Your site sends the plugin and theme files a few at a time, and your browser checks them with PHP compiled to WebAssembly, so the scan barely touches your host's CPU. No code is sent to any other service. Results are kept, and a plugin or theme is only checked again when its files change.
 
 **This plugin does not execute your theme and plugin code, as such this plugin cannot detect runtime compatibility issues.**
 
@@ -92,7 +92,6 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 10. What external services does this plugin use? =
 
-    Browser scanning (experimental) loads PHP for WebAssembly from files bundled with the plugin, served by your own site. Your plugins' and themes' files stay between your site and your browser; no external service is used for scanning. Hosts can turn browser scanning off with wpephpcompat_scan_engine.
     * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
 
 == Screenshots ==
@@ -105,7 +104,7 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 2.0.0 =
 - Updates come from WordPress.org again.
-- New scanner: PHPCompatibility 10 with PHPCompatibilityWP 3, built into the plugin, for PHP 7.4 through 8.5. No outside service. Premium, custom, and modified plugins and themes are now checked too. Scans run on the site in short batches sized for shared hosting, with retries, and skip (and list) any file that hits a memory or time limit. Results are stored and reused until a plugin's or theme's files change.
+- New scanner: PHPCompatibility 10 with PHPCompatibilityWP 3, built into the plugin, for PHP 7.4 through 8.5. No outside service. Premium, custom, and modified plugins and themes are now checked too. Scans run in your browser (PHP compiled to WebAssembly), on files your site sends in small batches, with retries, and skip (and list) any file that crashes the scan. Results are stored and reused until a plugin's or theme's files change.
 - Site Health: a test for your active plugins and theme (from stored results; it never scans), and a PHP Compatibility section on the Info tab, so results go into "Copy site info".
 - Flag plugins and themes whose code, or whose Composer dependencies, need a newer PHP than their "Requires PHP" header says.
 - Requires PHP 7.4 and WordPress 6.4.
@@ -263,7 +262,7 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 2.0.0 =
 - Built-in scanner, no external service: PHP 7.4 to 8.5, including premium and custom code.
-- Scans run on your site in short batches sized for shared hosting.
+- Scans run in your browser; your site only reads the files.
 - Requires PHP 7.4 and WordPress 6.4. Scan again after updating.
 
 = 1.6.0 =

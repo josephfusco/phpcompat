@@ -1,12 +1,13 @@
 /**
- * Browser engine (experimental): PHP compiled to WebAssembly, in a Web Worker.
+ * The scanner in the browser: PHP compiled to WebAssembly, in a Web Worker.
  *
  * Runs the plugin's own scanner (build/scanner/runner.php, the file the server
  * runs) on files the site sends, so the CPU work of a scan happens on the
  * admin's computer. The site only reads files.
  *
- * - PHP itself (the `@php-wasm/web-8-3` loader and .wasm, about 6.5 MB
- *   compressed) loads from config.wasmBaseUrl; the browser caches it.
+ * - PHP itself (the `@php-wasm/web-8-3` loader and .wasm, bundled in the
+ *   plugin's build/php-wasm/) loads from config.wasmBaseUrl; the browser
+ *   caches it.
  * - The scanner's files come from the site (GET /scanner-bundle) and are
  *   checked against the SHA-256 in the plugin's build manifest before use.
  * - No WordPress and no network access inside PHP: it only reads the files
