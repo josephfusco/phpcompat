@@ -75,6 +75,36 @@ class ScanLoadTest extends TestCase {
 		);
 	}
 
+	public function test_browser_runtime_is_served_from_the_plugin() {
+		Monkey\Functions\expect( 'plugins_url' )->once()
+			->with( 'build/php-wasm/' . Scanner_Bundle::WASM_VERSION . '/', WPEPHPCOMPAT_PLUGIN_FILE )
+			->andReturn( 'https://example.org/wp-content/plugins/phpcompat/build/php-wasm/3.1.62/' );
+		Monkey\Functions\expect( 'apply_filters' )->once()
+			->with( 'wpephpcompat_wasm_base_url', 'https://example.org/wp-content/plugins/phpcompat/build/php-wasm/3.1.62/' )
+			->andReturn( 'https://example.org/wp-content/plugins/phpcompat/build/php-wasm/3.1.62/' );
+		Monkey\Functions\when( 'trailingslashit' )->alias(
+			static function ( $url ) {
+				return rtrim( $url, '/' ) . '/';
+			}
+		);
+
+		$this->assertSame( 'https://example.org/wp-content/plugins/phpcompat/build/php-wasm/3.1.62/', Scanner_Bundle::wasm_base_url() );
+	}
+
+	public function test_browser_runtime_url_filter_preserves_a_trailing_slash() {
+		Monkey\Functions\when( 'plugins_url' )->justReturn( 'https://example.org/plugin/build/php-wasm/3.1.62/' );
+		Monkey\Functions\expect( 'apply_filters' )->once()
+			->with( 'wpephpcompat_wasm_base_url', 'https://example.org/plugin/build/php-wasm/3.1.62/' )
+			->andReturn( 'https://example.org/local-runtime' );
+		Monkey\Functions\when( 'trailingslashit' )->alias(
+			static function ( $url ) {
+				return rtrim( $url, '/' ) . '/';
+			}
+		);
+
+		$this->assertSame( 'https://example.org/local-runtime/', Scanner_Bundle::wasm_base_url() );
+	}
+
 	public function test_the_first_scan_takes_the_lock_and_renews_it() {
 		$lock = $this->lock();
 

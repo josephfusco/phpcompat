@@ -320,10 +320,12 @@ final class Engine {
 		}
 		$file->cleanUp();
 
+		// Source and message break ties, so the order doesn't depend on which PHP
+		// runs the scan (the site's, or PHP in the browser).
 		usort(
 			$messages,
 			static function ( $a, $b ) {
-				return array( $a['line'], $a['column'] ) <=> array( $b['line'], $b['column'] );
+				return array( $a['line'], $a['column'], $a['source'], $a['message'] ) <=> array( $b['line'], $b['column'], $b['source'], $b['message'] );
 			}
 		);
 

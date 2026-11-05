@@ -21,6 +21,8 @@
 		"test:unit": "wp-scripts test-unit-js"
 	},
 	"devDependencies": {
+		"@php-wasm/universal": "3.1.62",
+		"@php-wasm/web-8-3": "3.1.62",
 		"@playwright/test": "^1.64.1",
 		"@wordpress/e2e-test-utils-playwright": "^3.1.0",
 		"@wordpress/env": "^12.0.0",
@@ -29,7 +31,8 @@
 		"@wordpress/theme": "^3.0.0",
 		"cssnano": "^8.0.10",
 		"vite": "^8.3.5",
-		"vitest": "^5.0.5"
+		"vitest": "^5.0.5",
+		"wasm-feature-detect": "1.9.0"
 	},
 	"dependencies": {
 		"@wordpress/a11y": "^5.0.0",

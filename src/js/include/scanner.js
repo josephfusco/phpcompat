@@ -1,20 +1,20 @@
 /**
- * Scans plugins and themes on this site, a small batch of files per request.
+ * Scans plugins and themes on this site, in this browser, a batch at a time.
  *
- * PHP_CodeSniffer with PHPCompatibilityWP ships in the plugin and runs on the
- * site's own PHP. Nothing is loaded from other sites. A scan is a resumable
- * batch job, built to stay inside shared-hosting limits:
+ * The site sends each batch of PHP files, and this browser checks them with
+ * the plugin's PHP_CodeSniffer and PHPCompatibilityWP, running in PHP
+ * compiled to WebAssembly (see wasm-engine.js). The site only reads files.
+ * A scan is a resumable batch job:
  *
  * - One request at a time, so a scan never holds more than one PHP worker.
  * - Pacing: after a slow request (a busy host, often disk I/O on shared
  *   hosting), it waits a quarter of that time (at most 3 s) before the next.
- * - Adaptive batch size: each request aims to finish in about TARGET_MS. The
- *   size grows while requests are fast and halves after a slow or failed one,
- *   so slow hosts get small requests and fast hosts finish sooner. What's
- *   learned carries over to the next item.
+ * - Adaptive batch size: each batch (request plus checking) aims to take
+ *   about TARGET_MS. The size grows while batches are fast and halves after a
+ *   slow or failed one. What's learned carries over to the next item.
  * - Retries with exponential backoff and jitter. A busy site (429, 503, or no
- *   connection) is waited out, honoring Retry-After. A batch that times out
- *   or crashes PHP is split until the file causing it is found; that file is
+ *   connection) is waited out, honoring Retry-After. A batch that fails or
+ *   crashes PHP is split until the file causing it is found; that file is
  *   skipped and listed, and the rest of the item is still checked.
  * - The server caps every batch (files and bytes) whatever is asked.
  * - Files that change mid-scan are detected (409) and the item starts again.
@@ -22,6 +22,7 @@
  */
 import apiFetch from '@wordpress/api-fetch';
 import { __, _n, sprintf } from '@wordpress/i18n';
+import { startBrowserEngine, scanInBrowser } from './wasm-engine';
 
 /**
  * Error with a message that can be shown to people as is.
@@ -227,6 +228,10 @@ async function scanOnce( job, onStatus, signal ) {
 
 	const total = plan.total || 0;
 	const fingerprint = plan.fingerprint || '';
+	const versions = config().phpVersions || [];
+	if ( total ) {
+		await loadScanner( onStatus );
+	}
 	const report = { compatible: [], incompatible: [], versions: {} };
 	// A host can answer with a whole report (wpephpcompat_pre_scan_report).
 	mergeReport( report, plan.report || {} );
@@ -284,18 +289,27 @@ async function scanOnce( job, onStatus, signal ) {
 		const limit = batchSize;
 		const batchStarted = Date.now();
 		let response;
-		// A long request (a slow host, or PHP in the browser on Playground)
-		// says it's still going, so the row doesn't look stuck.
+		// A long batch (a slow host, or a slow computer) says it's still
+		// going, so the row doesn't look stuck.
 		const slow = setTimeout(
 			() => status( __( 'still working…', 'php-compatibility-checker' ) ),
 			SLOW_MS
 		);
 
+		let requestMs = 0;
 		try {
 			response = await postBatch(
 				{ ...item, cursor, limit, fingerprint },
 				signal
 			);
+			requestMs = Date.now() - batchStarted;
+			const result = await scanBatchInBrowser(
+				response.files || {},
+				versions,
+				signal
+			);
+			response.report = result.report;
+			response.scanned = result.checked;
 		} catch ( error ) {
 			if ( ! ( error instanceof BatchError ) || 'batch' !== error.kind ) {
 				await waitOrThrow( error );
@@ -319,7 +333,7 @@ async function scanOnce( job, onStatus, signal ) {
 						sprintf(
 							/* translators: 1: number of files, 2: last error message. */
 							__(
-								'%1$d files could not be checked because the scan stopped on each of them (%2$s). This is usually a memory or time limit on the server. Try again later, or scan with WP-CLI: wp php-compat scan.',
+								'%1$d files could not be checked because the scan stopped on each of them (%2$s). This is usually a memory limit in your browser or a time limit on the server. Try again later, or scan with WP-CLI: wp php-compat scan.',
 								'php-compatibility-checker'
 							),
 							crashed.length,
@@ -350,13 +364,14 @@ async function scanOnce( job, onStatus, signal ) {
 		status();
 
 		// A slow request means a busy host (often disk I/O on shared hosting):
-		// leave it room for visitors before the next one.
+		// leave it room for visitors before the next one. Only the request
+		// counts; the checking happened here.
 		if ( null !== cursor && undefined !== cursor ) {
-			await sleep( pause( took ), signal );
+			await sleep( pause( requestMs ), signal );
 		}
 	}
 
-	finishReport( report, config().phpVersions || [] );
+	finishReport( report, versions );
 	// Files that weren't checked, so a pass isn't overstated. Past the file
 	// limit, how many weren't listed is unknown: count it as one.
 	report.skipped = [ ...( plan.skipped || [] ), ...crashed ];
@@ -365,6 +380,60 @@ async function scanOnce( job, onStatus, signal ) {
 	report.platform_php = plan.platform_php || '';
 
 	return { report, source: 'local', fingerprint, cached: false };
+}
+
+/**
+ * Load PHP and the scanner in this browser (once per page). If this browser
+ * can't, every item would fail the same way, so the whole scan stops with one
+ * message.
+ *
+ * @param {(text: string) => void} onStatus Progress callback.
+ */
+async function loadScanner( onStatus ) {
+	onStatus(
+		__(
+			'Loading the scanner in your browser…',
+			'php-compatibility-checker'
+		)
+	);
+	try {
+		await startBrowserEngine( config() );
+	} catch ( error ) {
+		throw new ScanError(
+			sprintf(
+				/* translators: %s: error message. */
+				__(
+					"The scanner couldn't start in this browser (%s). Try a current version of Chrome, Edge, Firefox, or Safari, or scan with WP-CLI: wp php-compat scan.",
+					'php-compatibility-checker'
+				),
+				error.message
+			),
+			'busy'
+		);
+	}
+}
+
+/**
+ * Scan one batch in the browser. A failure (often PHP running out of memory)
+ * is handled like any failed batch: it's split until the file causing it is
+ * found, and that file is skipped.
+ *
+ * @param {Object<string, string|null>} files    Path => base64.
+ * @param {string[]}                    versions PHP versions.
+ * @param {AbortSignal}                 signal   Cancels the scan.
+ * @return {Promise<Object>} Result (see scanInBrowser()).
+ */
+async function scanBatchInBrowser( files, versions, signal ) {
+	try {
+		// Starts PHP again if it crashed on an earlier batch.
+		await startBrowserEngine( config() );
+		return await scanInBrowser( files, versions, signal );
+	} catch ( error ) {
+		if ( 'AbortError' === error?.name ) {
+			throw error;
+		}
+		throw new BatchError( error.message, { kind: 'batch' } );
+	}
 }
 
 /**

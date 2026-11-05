@@ -202,8 +202,10 @@ class Results {
 			foreach ( $files as $path => $file ) {
 				usort(
 					$files[ $path ]['messages'],
+					// Same order as the scanner (runner.php), so a report reads the
+					// same whether it was scanned on the server or in the browser.
 					static function ( $a, $b ) {
-						return $a['line'] <=> $b['line'];
+						return array( $a['line'], $a['column'], $a['source'], $a['message'] ) <=> array( $b['line'], $b['column'], $b['source'], $b['message'] );
 					}
 				);
 			}

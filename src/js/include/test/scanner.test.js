@@ -1,11 +1,17 @@
 /**
  * Unit tests for batched scanning: sizing, retries, skipping, merging.
+ *
+ * The site (apiFetch) hands out files; PHP in the browser (wasm-engine) is
+ * replaced by a fake that reports an error on PHP 8.0 for "failing" files.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 globalThis.window = globalThis.window || globalThis;
 const apiFetch = vi.fn();
 vi.mock( '@wordpress/api-fetch', () => ( { default: apiFetch } ) );
+const startBrowserEngine = vi.fn();
+const scanInBrowser = vi.fn();
+vi.mock( '../wasm-engine', () => ( { startBrowserEngine, scanInBrowser } ) );
 
 const {
 	scanItem,
@@ -66,7 +72,7 @@ function batchReport( failing = [] ) {
 }
 
 /**
- * A fake /scan-batch over a list of files.
+ * A fake /scan-batch over a list of files, and a fake PHP in the browser.
  *
  * @param {string[]}                         files           Paths.
  * @param {Object}                           options
@@ -85,8 +91,9 @@ function server( files, { fail = () => null, failing = [] } = {} ) {
 		const next = data.cursor + batch.length;
 		return response( 200, {
 			cached: false,
-			report: batchReport(
-				batch.filter( ( f ) => failing.includes( f ) )
+			report: { versions: {} },
+			files: Object.fromEntries(
+				batch.map( ( f ) => [ f, 'PD9waHA=' ] )
 			),
 			scanned: batch.length,
 			next: next < files.length ? next : null,
@@ -96,6 +103,16 @@ function server( files, { fail = () => null, failing = [] } = {} ) {
 			skipped: [],
 			truncated: false,
 		} );
+	} );
+	scanInBrowser.mockImplementation( async ( batch ) => {
+		const paths = Object.keys( batch );
+		return {
+			report: batchReport(
+				paths.filter( ( f ) => failing.includes( f ) )
+			),
+			checked: paths.length,
+			ms: 1,
+		};
 	} );
 	return calls;
 }
@@ -124,6 +141,8 @@ beforeEach( () => {
 	vi.useFakeTimers();
 	window.checkerList = { scanner: { phpVersions: VERSIONS, ruleset: 'r' } };
 	apiFetch.mockReset();
+	startBrowserEngine.mockReset().mockResolvedValue( {} );
+	scanInBrowser.mockReset();
 	cancelScans();
 } );
 
@@ -417,6 +436,64 @@ describe( 'scanItem', () => {
 		await expect( settle( scan ) ).rejects.toMatchObject( {
 			status: 'skipped',
 		} );
+	} );
+} );
+
+describe( 'PHP in the browser', () => {
+	it( 'checks the files the site sends', async () => {
+		const list = files( 25 );
+		server( list );
+
+		await settle( scanItem( job ) );
+
+		const checked = scanInBrowser.mock.calls.flatMap( ( [ batch ] ) =>
+			Object.keys( batch )
+		);
+		expect( checked ).toEqual( list );
+	} );
+
+	it( 'stops the whole scan when PHP cannot start in this browser', async () => {
+		server( files( 5 ) );
+		startBrowserEngine.mockRejectedValue(
+			new Error( 'Failed to fetch dynamically imported module' )
+		);
+
+		const error = await settle( scanItem( job ) ).catch( ( e ) => e );
+
+		expect( error.status ).toBe( 'busy' );
+		expect( error.message ).toMatch(
+			/couldn't start in this browser.*Failed to fetch/
+		);
+		expect( scanInBrowser ).not.toHaveBeenCalled();
+	} );
+
+	it( 'skips a file that crashes PHP in the browser, and checks the rest', async () => {
+		const list = files( 12 );
+		server( list );
+		const fake = scanInBrowser.getMockImplementation();
+		scanInBrowser.mockImplementation( async ( batch, ...rest ) => {
+			if ( 'f007.php' in batch ) {
+				throw new Error( 'memory access out of bounds' );
+			}
+			return fake( batch, ...rest );
+		} );
+
+		const result = await settle( scanItem( job ) );
+
+		expect( result.report.skipped ).toEqual( [ 'f007.php' ] );
+	} );
+
+	it( 'does not load PHP for an item with a stored result', async () => {
+		apiFetch.mockResolvedValue(
+			response( 200, {
+				cached: true,
+				result: { report: { compatible: VERSIONS }, source: 'local' },
+			} )
+		);
+
+		await settle( scanItem( job ) );
+
+		expect( startBrowserEngine ).not.toHaveBeenCalled();
 	} );
 } );
 
