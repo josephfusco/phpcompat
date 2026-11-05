@@ -1,6 +1,8 @@
 const defaultConfig = require("@wordpress/scripts/config/webpack.config");
 const path = require("path");
 const webpack = require("webpack");
+const CopyWebpackPlugin = require("copy-webpack-plugin");
+const wasmVersion = require("@php-wasm/web-8-3/package.json").version;
 
 // Extend the @wordpress/scripts config without webpack-merge: merging appends
 // arrays, which ran every default plugin twice and produced an asset file with
@@ -18,6 +20,21 @@ module.exports = {
   },
   plugins: [
     ...defaultConfig.plugins,
+    new CopyWebpackPlugin({
+      patterns: [
+        {
+          from: "{asyncify,jspi}/**/*.{js,wasm}",
+          context: path.dirname(require.resolve("@php-wasm/web-8-3/package.json")),
+          to: `php-wasm/${wasmVersion}/[path][name][ext]`,
+          info: { minimized: true },
+        },
+        {
+          from: "{LICENSE,README.md,package.json}",
+          context: path.dirname(require.resolve("@php-wasm/web-8-3/package.json")),
+          to: `php-wasm/${wasmVersion}/[name][ext]`,
+        },
+      ],
+    }),
     // @php-wasm/universal has a Node-only path (worker_threads) the browser
     // never takes; leave it out instead of emitting an empty chunk for it.
     new webpack.IgnorePlugin({ resourceRegExp: /^worker_threads$/ }),

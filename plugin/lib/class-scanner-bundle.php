@@ -162,7 +162,7 @@ class Scanner_Bundle {
 	 * The php-wasm build the browser engine loads: @php-wasm/web-8-3, the same
 	 * version as the @php-wasm/universal bundled in build/wasm-worker.js.
 	 */
-	const WASM_PACKAGE = '@php-wasm/web-8-3@3.1.62';
+	const WASM_VERSION = '3.1.62';
 
 	/**
 	 * Where scans run (experimental):
@@ -224,15 +224,14 @@ class Scanner_Bundle {
 	 */
 	public static function wasm_base_url(): string {
 		/**
-		 * Filters where the browser loads PHP for WebAssembly from, e.g. a copy on
-		 * the host's own CDN. The URL must serve the contents of the
-		 * WASM_PACKAGE npm package with CORS allowed.
+		 * Filters the local URL where the browser loads bundled PHP for
+		 * WebAssembly. The URL must preserve the package's directory layout.
 		 *
 		 * @since 2.0.0
 		 *
 		 * @param string $url Base URL, ending in a slash.
 		 */
-		return trailingslashit( (string) apply_filters( 'wpephpcompat_wasm_base_url', 'https://cdn.jsdelivr.net/npm/' . self::WASM_PACKAGE . '/' ) );
+		return trailingslashit( (string) apply_filters( 'wpephpcompat_wasm_base_url', plugins_url( 'build/php-wasm/' . self::WASM_VERSION . '/', WPEPHPCOMPAT_PLUGIN_FILE ) ) );
 	}
 
 	/**

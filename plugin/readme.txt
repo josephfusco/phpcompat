@@ -92,7 +92,7 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 10. What external services does this plugin use? =
 
-    * [jsDelivr](https://www.jsdelivr.com): when scanning in your browser (experimental), the browser downloads PHP for WebAssembly (the @php-wasm/web-8-3 package, about 6.5 MB, cached afterwards) from cdn.jsdelivr.net. No site data or code is sent; your plugins' and themes' files stay between your site and your browser. Hosts can serve their own copy with the wpephpcompat_wasm_base_url filter, or turn browser scanning off with wpephpcompat_scan_engine. See the [jsDelivr privacy policy](https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net).
+    Browser scanning (experimental) loads PHP for WebAssembly from files bundled with the plugin, served by your own site. Your plugins' and themes' files stay between your site and your browser; no external service is used for scanning. Hosts can turn browser scanning off with wpephpcompat_scan_engine.
     * [php.net](https://www.php.net): the list of PHP branches and their latest releases (releases/states.php and releases/active.php), requested by your server at most twice a day. Nothing about your site is sent beyond the request itself. See the [php.net privacy policy](https://www.php.net/privacy.php).
 
 == Screenshots ==
