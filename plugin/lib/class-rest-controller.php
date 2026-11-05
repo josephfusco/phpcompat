@@ -174,6 +174,15 @@ class Rest_Controller {
 				'methods'             => WP_REST_Server::READABLE,
 				'callback'            => array( $this, 'scanner_bundle' ),
 				'permission_callback' => array( $this, 'can_scan' ),
+				'args'                => array(
+					// The build's SHA-256: part of the URL, so a cached response is
+					// never one from before a plugin update.
+					'sha256' => array(
+						'type'     => 'string',
+						'pattern'  => '^[a-f0-9]{64}$',
+						'required' => true,
+					),
+				),
 			)
 		);
 
@@ -330,6 +339,9 @@ class Rest_Controller {
 
 		// Browser engine: hand over the files; the browser scans them.
 		if ( 'browser' === $request['engine'] ) {
+			if ( ! Scanner_Bundle::can_read_code() ) {
+				return new WP_Error( 'phpcompat_browser_engine_denied', __( 'Scanning in the browser isn\'t available to you on this network. Scanning on the server instead.', 'php-compatibility-checker' ), array( 'status' => 403 ) );
+			}
 			$response          = $this->batch_response( array( 'versions' => array() ), count( $batch['files'] ), $batch['next'], null === $batch['next'] ? '' : $list['files'][ $batch['next'] ], $list );
 			$response['files'] = self::read_files( $base, $batch['files'] );
 			return new WP_REST_Response( $response );
@@ -389,9 +401,13 @@ class Rest_Controller {
 	 * URLs (the web server would run them). The browser caches the bundle by
 	 * its SHA-256, so this runs about once per plugin update per browser.
 	 *
+	 * @param WP_REST_Request $request Request.
 	 * @return WP_REST_Response|WP_Error { @type string $ruleset, @type string $sha256, @type array $files Path => base64. }
 	 */
-	public function scanner_bundle() {
+	public function scanner_bundle( WP_REST_Request $request ) {
+		if ( ! Scanner_Bundle::can_read_code() ) {
+			return new WP_Error( 'phpcompat_browser_engine_denied', __( 'Scanning in the browser isn\'t available to you on this network.', 'php-compatibility-checker' ), array( 'status' => 403 ) );
+		}
 		if ( ! Scanner_Bundle::scanning_enabled() ) {
 			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );
 		}
@@ -400,7 +416,10 @@ class Rest_Controller {
 		}
 
 		$manifest = Scanner_Bundle::manifest();
-		$files    = self::read_files( Scanner_Bundle::dir(), (array) $manifest['files'] );
+		if ( ! hash_equals( (string) $manifest['sha256'], (string) $request['sha256'] ) ) {
+			return new WP_Error( 'phpcompat_stale_scanner', __( 'The plugin was updated. Reload the page, then scan again.', 'php-compatibility-checker' ), array( 'status' => 409 ) );
+		}
+		$files = self::read_files( Scanner_Bundle::dir(), (array) $manifest['files'] );
 
 		$response = new WP_REST_Response(
 			array(

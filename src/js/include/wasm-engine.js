@@ -10,6 +10,10 @@
 import apiFetch from '@wordpress/api-fetch';
 
 const CACHE_NAME = 'phpcompat-scanner';
+/** Longest wait for PHP to load (includes downloading about 6.5 MB). */
+const INIT_TIMEOUT_MS = 120000;
+/** Longest wait for one batch; past this the worker is assumed stuck or dead. */
+const SCAN_TIMEOUT_MS = 120000;
 
 let worker = null;
 let started = null;
@@ -55,10 +59,14 @@ export function startBrowserEngine( config ) {
  *
  * @param {Object<string, string|null>} files    Path => base64, from /scan-batch.
  * @param {string[]}                    versions PHP versions.
+ * @param {AbortSignal}                 signal   Stops waiting (the batch still finishes in the worker).
  * @return {Promise<{report: Object, checked: number, ms: number}>} Result.
  */
-export function scanInBrowser( files, versions ) {
-	return call( { type: 'scan', files, versions } );
+export function scanInBrowser( files, versions, signal ) {
+	return call(
+		{ type: 'scan', files, versions },
+		{ timeout: SCAN_TIMEOUT_MS, signal }
+	);
 }
 
 /**
@@ -78,36 +86,31 @@ async function boot( config ) {
 
 	worker = new globalThis.Worker( config.workerUrl );
 	worker.addEventListener( 'message', ( { data } ) => {
-		const request = pending.get( data.id );
+		const request = settle( data.id );
 		if ( ! request ) {
 			return;
 		}
-		pending.delete( data.id );
 		if ( data.ok ) {
 			request.resolve( data.result );
 		} else {
 			request.reject( new Error( data.error ) );
 		}
 	} );
-	// The worker died (out of memory, or failed to load): fail what's waiting
-	// and start a new one next time.
+	// The worker died (out of memory, or failed to load).
 	worker.addEventListener( 'error', ( event ) => {
 		event.preventDefault?.();
-		const error = new Error(
-			event.message || 'PHP in the browser stopped unexpectedly.'
-		);
-		pending.forEach( ( request ) => request.reject( error ) );
-		pending.clear();
-		stopWorker();
-		started = null;
+		crash( event.message || 'PHP in the browser stopped unexpectedly.' );
 	} );
 
-	const timings = await call( {
-		type: 'init',
-		wasmBaseUrl: config.wasmBaseUrl,
-		bundle,
-		sha256: config.sha256,
-	} );
+	const timings = await call(
+		{
+			type: 'init',
+			wasmBaseUrl: config.wasmBaseUrl,
+			bundle,
+			sha256: config.sha256,
+		},
+		{ timeout: INIT_TIMEOUT_MS }
+	);
 
 	return {
 		...timings,
@@ -137,7 +140,9 @@ async function scannerBundle( sha256 ) {
 		} catch {}
 	}
 
-	const bundle = await apiFetch( { path: '/php-compat/v1/scanner-bundle' } );
+	const bundle = await apiFetch( {
+		path: `/php-compat/v1/scanner-bundle?sha256=${ sha256 }`,
+	} );
 	if ( cache ) {
 		// Only the current build is kept.
 		const keys = await cache.keys().catch( () => [] );
@@ -157,20 +162,73 @@ async function scannerBundle( sha256 ) {
 /**
  * Send a message to the worker and wait for its reply.
  *
- * @param {Object} message Message.
+ * A worker the browser killed (often for memory) may never answer or report
+ * an error, so every call has a timeout. Past it, the worker is stopped, and
+ * the next call starts a new one.
+ *
+ * @param {Object}      message         Message.
+ * @param {Object}      options
+ * @param {number}      options.timeout Milliseconds to wait.
+ * @param {AbortSignal} options.signal  Optional. Stops waiting.
  * @return {Promise<Object>} Result.
  */
-function call( message ) {
+function call( message, { timeout, signal } ) {
 	if ( ! worker ) {
 		return Promise.reject(
 			new Error( 'PHP in the browser is not running.' )
 		);
 	}
+	if ( signal?.aborted ) {
+		return Promise.reject( new DOMException( 'Aborted', 'AbortError' ) );
+	}
 	const id = nextId++;
 	return new Promise( ( resolve, reject ) => {
-		pending.set( id, { resolve, reject } );
+		const timer = setTimeout(
+			() => crash( 'PHP in the browser stopped responding.' ),
+			timeout
+		);
+		const abort = () =>
+			settle( id ) &&
+			reject( new DOMException( 'Aborted', 'AbortError' ) );
+		signal?.addEventListener( 'abort', abort, { once: true } );
+		pending.set( id, {
+			resolve,
+			reject,
+			cleanup: () => {
+				clearTimeout( timer );
+				signal?.removeEventListener( 'abort', abort );
+			},
+		} );
 		worker.postMessage( { ...message, id } );
 	} );
+}
+
+/**
+ * Forget a pending call.
+ *
+ * @param {number} id Call ID.
+ * @return {Object|undefined} The call, if it was still pending.
+ */
+function settle( id ) {
+	const request = pending.get( id );
+	if ( request ) {
+		pending.delete( id );
+		request.cleanup();
+	}
+	return request;
+}
+
+/**
+ * The worker is gone or stuck: fail every pending call, stop it, and let
+ * the next call start a new one.
+ *
+ * @param {string} message Error message.
+ */
+function crash( message ) {
+	const error = new Error( message );
+	[ ...pending.keys() ].forEach( ( id ) => settle( id ).reject( error ) );
+	stopWorker();
+	started = null;
 }
 
 function stopWorker() {

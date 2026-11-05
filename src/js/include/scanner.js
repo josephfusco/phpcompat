@@ -85,6 +85,11 @@ const FATAL_CODES = [
 	'phpcompat_unknown_item',
 	'phpcompat_no_files',
 ];
+/** Errors from the browser engine, after which "auto" scans on the server. */
+const BROWSER_CODES = [
+	'phpcompat_browser_failed',
+	'phpcompat_browser_engine_denied',
+];
 /** Times an item starts over because its files changed mid-scan. */
 const MAX_RESTARTS = 2;
 
@@ -232,7 +237,22 @@ async function scanOnce( job, onStatus, signal ) {
 
 	const total = plan.total || 0;
 	const fingerprint = plan.fingerprint || '';
-	const engine = total ? await chooseEngine( onStatus ) : 'server';
+	let engine = total ? await chooseEngine( onStatus ) : 'server';
+	// "auto" only: when the browser fails partway, scan the rest on the server.
+	const fallBackToServer = ( error ) => {
+		if ( 'browser' !== engine || 'auto' !== wantedEngine( config() ) ) {
+			return false;
+		}
+		browserFailed = true;
+		engine = 'server';
+		timing.engine = 'server (fell back from browser)';
+		// eslint-disable-next-line no-console
+		console.warn(
+			'PHP Compatibility Checker: scanning on the server instead of in the browser:',
+			error.message
+		);
+		return true;
+	};
 	const versions = config().phpVersions || [];
 	// Measured for the spike: where the time goes, per item.
 	const timing = {
@@ -318,13 +338,22 @@ async function scanOnce( job, onStatus, signal ) {
 			if ( 'browser' === engine ) {
 				const result = await scanBatchInBrowser(
 					response.files || {},
-					versions
+					versions,
+					signal
 				);
 				timing.wasmMs += result.ms;
 				response.report = result.report;
 				response.scanned = result.checked;
 			}
 		} catch ( error ) {
+			// The same batch again, on the server.
+			if (
+				error instanceof BatchError &&
+				BROWSER_CODES.includes( error.code ) &&
+				fallBackToServer( error )
+			) {
+				continue;
+			}
 			if ( ! ( error instanceof BatchError ) || 'batch' !== error.kind ) {
 				await waitOrThrow( error );
 				continue;
@@ -460,20 +489,28 @@ async function chooseEngine( onStatus ) {
 }
 
 /**
- * Scan one batch in the browser. A failure is reported like a server batch
- * that crashed, so the batch is split until the file causing it is found.
+ * Scan one batch in the browser. In "auto" mode a failure moves the scan to
+ * the server; with "browser" it's handled like a server batch that crashed,
+ * so the batch is split until the file causing it is found.
  *
  * @param {Object<string, string|null>} files    Path => base64.
  * @param {string[]}                    versions PHP versions.
+ * @param {AbortSignal}                 signal   Cancels the scan.
  * @return {Promise<Object>} Result (see scanInBrowser()).
  */
-async function scanBatchInBrowser( files, versions ) {
+async function scanBatchInBrowser( files, versions, signal ) {
 	try {
 		// Starts PHP again if it crashed on an earlier batch.
 		await startBrowserEngine( config() );
-		return await scanInBrowser( files, versions );
+		return await scanInBrowser( files, versions, signal );
 	} catch ( error ) {
-		throw new BatchError( error.message, { kind: 'batch' } );
+		if ( 'AbortError' === error?.name ) {
+			throw error;
+		}
+		throw new BatchError( error.message, {
+			code: 'phpcompat_browser_failed',
+			kind: 'batch',
+		} );
 	}
 }
 

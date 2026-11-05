@@ -40,6 +40,22 @@ class BatchingTest extends TestCase {
 		parent::tearDown();
 	}
 
+	public function test_read_files_sends_only_files_inside_the_item() {
+		$outside = sys_get_temp_dir() . '/pcc-outside-' . uniqid() . '.php';
+		file_put_contents( $outside, '<?php // secret' );
+		symlink( $outside, $this->dir . '/link.php' );
+
+		$files = Rest_Controller::read_files( $this->dir, array( 'plugin.php', 'includes/a.php', '../' . basename( $outside ), 'link.php', 'missing.php' ) );
+		unlink( $outside );
+
+		$this->assertSame( '<?php // main', base64_decode( $files['plugin.php'] ) );
+		$this->assertSame( '<?php // a', base64_decode( $files['includes/a.php'] ) );
+		// Outside the item, through a symlink, or missing: never read.
+		$this->assertNull( $files[ '../' . basename( $outside ) ] );
+		$this->assertNull( $files['link.php'] );
+		$this->assertNull( $files['missing.php'] );
+	}
+
 	public function test_file_list_is_sorted_php_only() {
 		$list = Scanner::file_list( $this->dir );
 

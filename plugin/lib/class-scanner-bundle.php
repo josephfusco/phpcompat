@@ -171,9 +171,17 @@ class Scanner_Bundle {
 	 *   site only reads files.
 	 * - "auto": the browser when it can load PHP, otherwise the server.
 	 *
+	 * Always "server" on multisite for anyone but super admins: the browser
+	 * engine sends plugin source to the browser, and subsite admins can't
+	 * otherwise read network-installed plugin code.
+	 *
 	 * @return string
 	 */
 	public static function engine(): string {
+		if ( ! self::can_read_code() ) {
+			return 'server';
+		}
+
 		/**
 		 * Filters where scans from the scan page run.
 		 *
@@ -184,6 +192,28 @@ class Scanner_Bundle {
 		$engine = (string) apply_filters( 'wpephpcompat_scan_engine', 'auto' );
 
 		return in_array( $engine, array( 'auto', 'browser', 'server' ), true ) ? $engine : 'auto';
+	}
+
+	/**
+	 * Whether the current user may receive plugin and theme source (browser engine).
+	 *
+	 * @return bool
+	 */
+	public static function can_read_code(): bool {
+		return ! is_multisite() || is_super_admin();
+	}
+
+	/**
+	 * URL of build/wasm-worker.js, versioned by its build hash so an update
+	 * isn't served a cached copy.
+	 *
+	 * @return string
+	 */
+	public static function worker_url(): string {
+		$asset   = WPEPHPCOMPAT_PLUGIN_DIR . 'build/wasm-worker.asset.php';
+		$version = is_readable( $asset ) ? ( ( require $asset )['version'] ?? WPEPHPCOMPAT_VERSION ) : WPEPHPCOMPAT_VERSION;
+
+		return add_query_arg( 'ver', rawurlencode( (string) $version ), plugins_url( 'build/wasm-worker.js', WPEPHPCOMPAT_PLUGIN_FILE ) );
 	}
 
 	/**
@@ -219,7 +249,7 @@ class Scanner_Bundle {
 			'disabledMessage' => self::disabled_message(),
 			'engine'          => self::engine(),
 			'wasmBaseUrl'     => self::wasm_base_url(),
-			'workerUrl'       => plugins_url( 'build/wasm-worker.js', WPEPHPCOMPAT_PLUGIN_FILE ),
+			'workerUrl'       => self::worker_url(),
 			'sha256'          => (string) ( self::manifest()['sha256'] ?? '' ),
 		);
 	}

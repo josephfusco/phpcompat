@@ -6,6 +6,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 globalThis.window = globalThis.window || globalThis;
 const apiFetch = vi.fn();
 vi.mock( '@wordpress/api-fetch', () => ( { default: apiFetch } ) );
+// The browser engine (PHP in WebAssembly) is replaced; wantedEngine() is real.
+const startBrowserEngine = vi.fn();
+const scanInBrowser = vi.fn();
+vi.mock( '../wasm-engine', async ( importOriginal ) => ( {
+	...( await importOriginal() ),
+	startBrowserEngine,
+	scanInBrowser,
+} ) );
 
 const {
 	scanItem,
@@ -417,6 +425,91 @@ describe( 'scanItem', () => {
 		await expect( settle( scan ) ).rejects.toMatchObject( {
 			status: 'skipped',
 		} );
+	} );
+} );
+
+describe( 'browser engine', () => {
+	/**
+	 * A fake /scan-batch that hands out files (engine "browser") or scans them.
+	 *
+	 * @param {string[]} list Paths.
+	 */
+	function browserServer( list ) {
+		const calls = [];
+		apiFetch.mockImplementation( async ( { data } ) => {
+			calls.push( { ...data } );
+			const batch = list.slice( data.cursor, data.cursor + data.limit );
+			const next = data.cursor + batch.length;
+			const body = {
+				cached: false,
+				report:
+					'browser' === data.engine
+						? { versions: {} }
+						: batchReport( batch ),
+				scanned: batch.length,
+				next: next < list.length ? next : null,
+				next_path: next < list.length ? list[ next ] : '',
+				total: list.length,
+				fingerprint: 'abc',
+				skipped: [],
+				truncated: false,
+			};
+			if ( 'browser' === data.engine ) {
+				body.files = Object.fromEntries(
+					batch.map( ( f ) => [ f, 'PD9waHA=' ] )
+				);
+			}
+			return response( 200, body );
+		} );
+		return calls;
+	}
+
+	beforeEach( () => {
+		startBrowserEngine.mockReset().mockResolvedValue( {} );
+		scanInBrowser.mockReset();
+	} );
+
+	it( 'scans the files the site sends in the browser', async () => {
+		window.checkerList.scanner.engine = 'browser';
+		const list = files( 25 );
+		const calls = browserServer( list );
+		scanInBrowser.mockImplementation( async ( batch ) => ( {
+			report: batchReport( Object.keys( batch ) ),
+			checked: Object.keys( batch ).length,
+			ms: 1,
+		} ) );
+
+		const result = await settle( scanItem( job ) );
+
+		expect(
+			calls.slice( 1 ).every( ( c ) => 'browser' === c.engine )
+		).toBe( true );
+		const scanned = scanInBrowser.mock.calls.flatMap( ( [ batch ] ) =>
+			Object.keys( batch )
+		);
+		expect( scanned ).toEqual( list );
+		expect( result.report.versions[ '8.0' ].totals.errors ).toBe( 25 );
+	} );
+
+	it( 'in "auto", scans on the server when the browser fails', async () => {
+		window.checkerList.scanner.engine = 'auto';
+		const list = files( 25 );
+		const calls = browserServer( list );
+		scanInBrowser.mockRejectedValue(
+			new Error( 'PHP in the browser stopped responding.' )
+		);
+
+		const result = await settle( scanItem( job ) );
+
+		const engines = calls.slice( 1 ).map( ( c ) => c.engine );
+		expect( engines[ 0 ] ).toBe( 'browser' );
+		expect( engines.slice( 1 ).every( ( e ) => 'server' === e ) ).toBe(
+			true
+		);
+		// The failed batch was requested again from the server: every file counted once.
+		expect( calls[ 2 ].cursor ).toBe( calls[ 1 ].cursor );
+		expect( result.report.versions[ '8.0' ].totals.errors ).toBe( 25 );
+		expect( result.report.skipped ).toEqual( [] );
 	} );
 } );
 
