@@ -17,7 +17,9 @@ use WP_REST_Server;
 /**
  * Routes under php-compat/v1:
  *
- * - POST /scan-batch Scan the next few PHP files of one plugin or theme.
+ * - POST /scan-batch Scan the next few PHP files of one plugin or theme, or
+ *                    (engine "browser") send them to the browser to scan.
+ * - GET /scanner-bundle The scanner's files, for the browser engine.
  * - POST /results    Store the merged result of a finished scan.
  * - DELETE /scan-lock Let go of the site's scan lock when a scan ends.
  *
@@ -35,9 +37,15 @@ use WP_REST_Server;
  * - The fingerprint is stored with the result, so an unchanged item isn't
  *   scanned again: the first request returns the stored result.
  *
- * Both need the plugin's capability (manage_options). Items are looked up from
- * the installed plugin and theme lists; no path from the request is used to
- * open a file. Responses carry compatibility messages, never file contents.
+ * Browser engine (experimental): the server only reads files. The browser
+ * runs the same runner.php in PHP compiled to WebAssembly, so the CPU work of
+ * a scan happens on the admin's computer instead of the site's PHP worker.
+ *
+ * Every route needs the plugin's capability (manage_options). Items are
+ * looked up from the installed plugin and theme lists; no path from the
+ * request is used to open a file. File contents (browser engine) come only
+ * from the item's own file list, the same files an admin can already read in
+ * the plugin and theme file editors.
  */
 class Rest_Controller {
 
@@ -148,8 +156,24 @@ class Rest_Controller {
 						),
 						'fingerprint' => $fingerprint,
 						'scan_token'  => $scan_token,
+						// "browser": send the batch's files instead of scanning them here.
+						'engine'      => array(
+							'type'    => 'string',
+							'enum'    => array( 'server', 'browser' ),
+							'default' => 'server',
+						),
 					)
 				),
+			)
+		);
+
+		register_rest_route(
+			self::ROUTE_NAMESPACE,
+			'/scanner-bundle',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'scanner_bundle' ),
+				'permission_callback' => array( $this, 'can_scan' ),
 			)
 		);
 
@@ -304,6 +328,13 @@ class Rest_Controller {
 		$base  = is_file( $root ) ? dirname( $root ) : $root;
 		$batch = self::select_batch( $base, $list['files'], $cursor, (int) $request['limit'] );
 
+		// Browser engine: hand over the files; the browser scans them.
+		if ( 'browser' === $request['engine'] ) {
+			$response          = $this->batch_response( array( 'versions' => array() ), count( $batch['files'] ), $batch['next'], null === $batch['next'] ? '' : $list['files'][ $batch['next'] ], $list );
+			$response['files'] = self::read_files( $base, $batch['files'] );
+			return new WP_REST_Response( $response );
+		}
+
 		$this->prepare_for_scan();
 
 		try {
@@ -327,6 +358,60 @@ class Rest_Controller {
 				$list
 			)
 		);
+	}
+
+	/**
+	 * Contents of some files of an item, base64 encoded (files needn't be UTF-8).
+	 * Only regular files inside $base are read; any other path gets null, and
+	 * the browser counts it as checked with nothing found, as the runner does.
+	 *
+	 * @param string   $base  Directory the paths are relative to.
+	 * @param string[] $paths Relative paths from the item's file list.
+	 * @return array<string, string|null> Path => base64 contents.
+	 */
+	public static function read_files( string $base, array $paths ): array {
+		$real  = realpath( $base );
+		$files = array();
+
+		foreach ( $paths as $relative ) {
+			$path = false !== $real ? realpath( $real . '/' . $relative ) : false;
+			$data = false !== $path && is_file( $path ) && Scanner::is_inside( $path, $real ) ? file_get_contents( $path ) : false; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file.
+
+			$files[ $relative ] = false === $data ? null : base64_encode( $data ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Binary-safe transport of source files, not obfuscation.
+		}
+
+		return $files;
+	}
+
+	/**
+	 * GET /scanner-bundle: the scanner's files (runner.php and vendor/), for the
+	 * browser engine. They're PHP, so the browser can't fetch them as plain
+	 * URLs (the web server would run them). The browser caches the bundle by
+	 * its SHA-256, so this runs about once per plugin update per browser.
+	 *
+	 * @return WP_REST_Response|WP_Error { @type string $ruleset, @type string $sha256, @type array $files Path => base64. }
+	 */
+	public function scanner_bundle() {
+		if ( ! Scanner_Bundle::scanning_enabled() ) {
+			return new WP_Error( 'phpcompat_scanning_disabled', Scanner_Bundle::disabled_message(), array( 'status' => 403 ) );
+		}
+		if ( ! Scanner_Bundle::verify() ) {
+			return new WP_Error( 'phpcompat_no_scanner', __( 'The scanner in this copy of the plugin is missing or incomplete. Reinstall the plugin.', 'php-compatibility-checker' ), array( 'status' => 500 ) );
+		}
+
+		$manifest = Scanner_Bundle::manifest();
+		$files    = self::read_files( Scanner_Bundle::dir(), (array) $manifest['files'] );
+
+		$response = new WP_REST_Response(
+			array(
+				'ruleset' => Scanner_Bundle::ruleset(),
+				'sha256'  => (string) $manifest['sha256'],
+				'files'   => $files,
+			)
+		);
+		$response->header( 'Cache-Control', 'private, max-age=86400' );
+
+		return $response;
 	}
 
 	/**

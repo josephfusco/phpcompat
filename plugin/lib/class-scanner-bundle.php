@@ -159,6 +159,53 @@ class Scanner_Bundle {
 	}
 
 	/**
+	 * The php-wasm build the browser engine loads: @php-wasm/web-8-3, the same
+	 * version as the @php-wasm/universal bundled in build/wasm-worker.js.
+	 */
+	const WASM_PACKAGE = '@php-wasm/web-8-3@3.1.62';
+
+	/**
+	 * Where scans run (experimental):
+	 * - "server": on this site's PHP, a batch per request.
+	 * - "browser": in the admin's browser, in PHP compiled to WebAssembly; the
+	 *   site only reads files.
+	 * - "auto": the browser when it can load PHP, otherwise the server.
+	 *
+	 * @return string
+	 */
+	public static function engine(): string {
+		/**
+		 * Filters where scans from the scan page run.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param string $engine "auto", "browser", or "server".
+		 */
+		$engine = (string) apply_filters( 'wpephpcompat_scan_engine', 'auto' );
+
+		return in_array( $engine, array( 'auto', 'browser', 'server' ), true ) ? $engine : 'auto';
+	}
+
+	/**
+	 * Base URL of the php-wasm loader and .wasm file for the browser engine
+	 * (about 6.5 MB compressed, cached by the browser).
+	 *
+	 * @return string
+	 */
+	public static function wasm_base_url(): string {
+		/**
+		 * Filters where the browser loads PHP for WebAssembly from, e.g. a copy on
+		 * the host's own CDN. The URL must serve the contents of the
+		 * WASM_PACKAGE npm package with CORS allowed.
+		 *
+		 * @since 2.0.0
+		 *
+		 * @param string $url Base URL, ending in a slash.
+		 */
+		return trailingslashit( (string) apply_filters( 'wpephpcompat_wasm_base_url', 'https://cdn.jsdelivr.net/npm/' . self::WASM_PACKAGE . '/' ) );
+	}
+
+	/**
 	 * Settings the scan page needs.
 	 *
 	 * @return array
@@ -170,6 +217,10 @@ class Scanner_Bundle {
 			'phpVersions'     => self::PHP_VERSIONS,
 			'enabled'         => self::scanning_enabled(),
 			'disabledMessage' => self::disabled_message(),
+			'engine'          => self::engine(),
+			'wasmBaseUrl'     => self::wasm_base_url(),
+			'workerUrl'       => plugins_url( 'build/wasm-worker.js', WPEPHPCOMPAT_PLUGIN_FILE ),
+			'sha256'          => (string) ( self::manifest()['sha256'] ?? '' ),
 		);
 	}
 

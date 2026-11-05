@@ -12,6 +12,13 @@ module.exports = {
   },
   entry: {
     scan: path.resolve(process.cwd(), "src/js", "scan.js"),
+    // Browser engine (experimental): PHP in WebAssembly, in a Web Worker.
+    "wasm-worker": path.resolve(process.cwd(), "src/js", "wasm-worker.js"),
+  },
+  resolve: {
+    ...defaultConfig.resolve,
+    // @php-wasm/universal has a Node-only path (worker_threads) the browser never takes.
+    fallback: { ...(defaultConfig.resolve?.fallback || {}), worker_threads: false },
   },
   performance: {
     ...defaultConfig.performance,

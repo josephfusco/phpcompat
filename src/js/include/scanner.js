@@ -22,6 +22,7 @@
  */
 import apiFetch from '@wordpress/api-fetch';
 import { __, _n, sprintf } from '@wordpress/i18n';
+import { wantedEngine, startBrowserEngine, scanInBrowser } from './wasm-engine';
 
 /**
  * Error with a message that can be shown to people as is.
@@ -88,6 +89,10 @@ const FATAL_CODES = [
 const MAX_RESTARTS = 2;
 
 let batchSize = START_BATCH;
+// Set once per page when the browser engine can't start in "auto" mode, so
+// later items go straight to the server.
+let browserFailed = false;
+let browserReported = false;
 let controller = new AbortController();
 // Holds the site's scan lock for one scan (see Scan_Lock); '' between scans.
 let scanToken = '';
@@ -227,6 +232,17 @@ async function scanOnce( job, onStatus, signal ) {
 
 	const total = plan.total || 0;
 	const fingerprint = plan.fingerprint || '';
+	const engine = total ? await chooseEngine( onStatus ) : 'server';
+	const versions = config().phpVersions || [];
+	// Measured for the spike: where the time goes, per item.
+	const timing = {
+		engine,
+		files: total,
+		requestMs: 0,
+		wasmMs: 0,
+		batches: 0,
+	};
+	const itemStarted = Date.now();
 	const report = { compatible: [], incompatible: [], versions: {} };
 	// A host can answer with a whole report (wpephpcompat_pre_scan_report).
 	mergeReport( report, plan.report || {} );
@@ -291,11 +307,23 @@ async function scanOnce( job, onStatus, signal ) {
 			SLOW_MS
 		);
 
+		let requestMs = 0;
 		try {
 			response = await postBatch(
-				{ ...item, cursor, limit, fingerprint },
+				{ ...item, cursor, limit, fingerprint, engine },
 				signal
 			);
+			requestMs = Date.now() - batchStarted;
+			timing.requestMs += requestMs;
+			if ( 'browser' === engine ) {
+				const result = await scanBatchInBrowser(
+					response.files || {},
+					versions
+				);
+				timing.wasmMs += result.ms;
+				response.report = result.report;
+				response.scanned = result.checked;
+			}
 		} catch ( error ) {
 			if ( ! ( error instanceof BatchError ) || 'batch' !== error.kind ) {
 				await waitOrThrow( error );
@@ -341,6 +369,7 @@ async function scanOnce( job, onStatus, signal ) {
 		failures = 0;
 		fileFailures = 0;
 		batches++;
+		timing.batches++;
 		const took = Date.now() - batchStarted;
 		batchSize = nextBatchSize( limit, took );
 		checked += response.scanned || 0;
@@ -351,12 +380,22 @@ async function scanOnce( job, onStatus, signal ) {
 
 		// A slow request means a busy host (often disk I/O on shared hosting):
 		// leave it room for visitors before the next one.
+		// With the browser engine the site only read files, so only that time counts.
 		if ( null !== cursor && undefined !== cursor ) {
-			await sleep( pause( took ), signal );
+			await sleep(
+				pause( 'browser' === engine ? requestMs : took ),
+				signal
+			);
 		}
 	}
 
-	finishReport( report, config().phpVersions || [] );
+	// eslint-disable-next-line no-console
+	console.info( `PHP Compatibility Checker: ${ job.slug } on ${ engine }`, {
+		...timing,
+		totalMs: Date.now() - itemStarted,
+	} );
+
+	finishReport( report, versions );
 	// Files that weren't checked, so a pass isn't overstated. Past the file
 	// limit, how many weren't listed is unknown: count it as one.
 	report.skipped = [ ...( plan.skipped || [] ), ...crashed ];
@@ -365,6 +404,77 @@ async function scanOnce( job, onStatus, signal ) {
 	report.platform_php = plan.platform_php || '';
 
 	return { report, source: 'local', fingerprint, cached: false };
+}
+
+/**
+ * Where this item's files are scanned: in the browser when the site allows it
+ * and PHP loads here, otherwise on the server ("auto" falls back quietly; a
+ * site set to "browser" only fails the scan).
+ *
+ * @param {(text: string) => void} onStatus Progress callback.
+ * @return {Promise<string>} "browser" or "server".
+ */
+async function chooseEngine( onStatus ) {
+	const wanted = wantedEngine( config() );
+	if ( 'server' === wanted || ( 'auto' === wanted && browserFailed ) ) {
+		return 'server';
+	}
+	onStatus(
+		__(
+			'Loading the scanner in your browser…',
+			'php-compatibility-checker'
+		)
+	);
+	try {
+		const timings = await startBrowserEngine( config() );
+		if ( ! browserReported ) {
+			browserReported = true;
+			// eslint-disable-next-line no-console
+			console.info(
+				'PHP Compatibility Checker: browser engine ready',
+				timings
+			);
+		}
+		return 'browser';
+	} catch ( error ) {
+		if ( 'browser' === wanted ) {
+			throw new ScanError(
+				sprintf(
+					/* translators: %s: error message. */
+					__(
+						"PHP couldn't start in this browser (%s).",
+						'php-compatibility-checker'
+					),
+					error.message
+				)
+			);
+		}
+		browserFailed = true;
+		// eslint-disable-next-line no-console
+		console.warn(
+			'PHP Compatibility Checker: scanning on the server instead of in the browser:',
+			error.message
+		);
+		return 'server';
+	}
+}
+
+/**
+ * Scan one batch in the browser. A failure is reported like a server batch
+ * that crashed, so the batch is split until the file causing it is found.
+ *
+ * @param {Object<string, string|null>} files    Path => base64.
+ * @param {string[]}                    versions PHP versions.
+ * @return {Promise<Object>} Result (see scanInBrowser()).
+ */
+async function scanBatchInBrowser( files, versions ) {
+	try {
+		// Starts PHP again if it crashed on an earlier batch.
+		await startBrowserEngine( config() );
+		return await scanInBrowser( files, versions );
+	} catch ( error ) {
+		throw new BatchError( error.message, { kind: 'batch' } );
+	}
 }
 
 /**
