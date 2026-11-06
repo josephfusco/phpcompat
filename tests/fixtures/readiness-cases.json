@@ -1,0 +1,64 @@
+{
+	"_comment": "Shared by tests/ReadinessTest.php (Scanner::readiness) and src/js/include/test/report.test.js (readiness), so both agree. Blockers are compared as version => slugs.",
+	"cases": [
+		{
+			"name": "everything passes everywhere",
+			"current": "8.2.35",
+			"items": [
+				{ "slug": "a", "status": "passes", "php": { "7.4": "pass", "8.2": "pass", "8.3": "pass", "8.4": "pass", "8.5": "pass" } },
+				{ "slug": "b", "status": "passes", "php": { "7.4": "pass", "8.2": "pass", "8.3": "pass", "8.4": "pass", "8.5": "pass" } }
+			],
+			"expected": { "complete": true, "ready_for": [ "7.4", "8.2", "8.3", "8.4", "8.5" ], "next_ready": "8.5", "next_blocked": "", "blockers": {}, "unknown": [] }
+		},
+		{
+			"name": "one plugin blocks 8.4 and up",
+			"current": "8.2",
+			"items": [
+				{ "slug": "a", "status": "passes", "php": { "8.2": "pass", "8.3": "pass", "8.4": "pass", "8.5": "pass" } },
+				{ "slug": "b", "status": "problems", "php": { "8.2": "pass", "8.3": "pass", "8.4": "fail", "8.5": "fail" } }
+			],
+			"expected": { "complete": true, "ready_for": [ "8.2", "8.3" ], "next_ready": "8.3", "next_blocked": "8.4", "blockers": { "8.4": [ "b" ], "8.5": [ "b" ] }, "unknown": [] }
+		},
+		{
+			"name": "the very next version is blocked",
+			"current": "8.2.1",
+			"items": [
+				{ "slug": "a", "status": "problems", "php": { "8.2": "pass", "8.3": "fail", "8.4": "pass" } }
+			],
+			"expected": { "complete": true, "ready_for": [ "8.2", "8.4" ], "next_ready": "", "next_blocked": "8.3", "blockers": { "8.3": [ "a" ] }, "unknown": [] }
+		},
+		{
+			"name": "versions below an item's minimum block those versions only",
+			"current": "8.3",
+			"items": [
+				{ "slug": "a", "status": "passes", "php": { "7.4": "not_counted", "8.2": "not_counted", "8.3": "pass", "8.4": "pass" } },
+				{ "slug": "b", "status": "passes", "php": { "7.4": "pass", "8.2": "pass", "8.3": "pass", "8.4": "pass" } }
+			],
+			"expected": { "complete": true, "ready_for": [ "8.3", "8.4" ], "next_ready": "8.4", "next_blocked": "", "blockers": { "7.4": [ "a" ], "8.2": [ "a" ] }, "unknown": [] }
+		},
+		{
+			"name": "an item without results makes it incomplete",
+			"current": "8.2",
+			"items": [
+				{ "slug": "a", "status": "passes", "php": { "8.2": "pass", "8.3": "pass" } },
+				{ "slug": "b", "status": "not_scanned", "php": {} },
+				{ "slug": "c", "status": "failed", "php": {} }
+			],
+			"expected": { "complete": false, "ready_for": [ "8.2", "8.3" ], "next_ready": "8.3", "next_blocked": "", "blockers": {}, "unknown": [ "b", "c" ] }
+		},
+		{
+			"name": "already on the newest checked version",
+			"current": "8.5.12",
+			"items": [
+				{ "slug": "a", "status": "passes", "php": { "8.4": "pass", "8.5": "pass" } }
+			],
+			"expected": { "complete": true, "ready_for": [ "8.4", "8.5" ], "next_ready": "", "next_blocked": "", "blockers": {}, "unknown": [] }
+		},
+		{
+			"name": "nothing to go on",
+			"current": "8.2",
+			"items": [],
+			"expected": { "complete": false, "ready_for": [], "next_ready": "", "next_blocked": "", "blockers": {}, "unknown": [] }
+		}
+	]
+}

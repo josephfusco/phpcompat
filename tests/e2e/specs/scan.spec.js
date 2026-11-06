@@ -653,8 +653,15 @@ test.describe( 'PHP Compatibility scan', () => {
 		// "Need help" only appears once a scan finds problems.
 		const help = aside.locator( '.wpe-pcc-information' );
 		await expect( help ).toBeHidden();
+		const ready = aside.locator( '.wpe-pcc-readiness' );
+		await expect( ready ).toBeHidden();
 		await scanButton( page ).click();
 		await scanFinished( page );
 		await expect( help ).toBeVisible();
+		// Which newer PHP the active plugins and theme are ready for. The fixture's
+		// new-php-plugin requires a PHP newer than any checked, so it's not known.
+		await expect( ready ).toHaveText(
+			'Ready for a newer PHP? Not known yet: no results for New PHP Plugin.'
+		);
 	} );
 } );

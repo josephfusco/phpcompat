@@ -10,6 +10,8 @@ const { compareVersions, isBundledLibrary, neededPhp, needsPhpNote } =
 	await import( '../render' );
 const { default: neededPhpCases } =
 	await import( '../../../../tests/fixtures/needed-php-cases.json' );
+const { default: readinessCases } =
+	await import( '../../../../tests/fixtures/readiness-cases.json' );
 const {
 	groupProblems,
 	groupByMessage,
@@ -22,6 +24,7 @@ const {
 	glanceDetails,
 	problemTables,
 	problemTypeLabel,
+	readiness,
 } = await import( '../report-model' );
 const { buildReportHtml } = await import( '../print-report' );
 const { csvCell, csvReport, reportMeta } = await import( '../download' );
@@ -508,5 +511,98 @@ describe( 'needed PHP (shared cases with the PHP side)', () => {
 				bundled: false,
 			} )
 		).toMatch( /from Composer.*doesn't say/ );
+	} );
+} );
+
+describe( 'readiness (same cases as Scanner::readiness)', () => {
+	it.each( readinessCases.cases )( '$name', ( testCase ) => {
+		const actual = readiness(
+			testCase.items.map( ( item ) => ( { type: 'plugin', ...item } ) ),
+			testCase.current
+		);
+		const blockers = Object.fromEntries(
+			Object.entries( actual.blockers ).map( ( [ version, list ] ) => [
+				version,
+				list.map( ( item ) => item.slug ),
+			] )
+		);
+		expect( {
+			...actual,
+			blockers,
+			unknown: actual.unknown.map( ( item ) => item.slug ),
+		} ).toEqual( testCase.expected );
+	} );
+} );
+
+describe( 'readiness note', async () => {
+	const { readinessMessage, nameList } = await import( '../readiness-note' );
+	const names = ( ...list ) => list.map( ( name ) => ( { name } ) );
+	const base = {
+		complete: true,
+		next_ready: '',
+		next_blocked: '',
+		blockers: {},
+		unknown: [],
+	};
+
+	it( 'lists up to three names, then a count', () => {
+		expect( nameList( names( 'A' ) ) ).toBe( 'A' );
+		expect( nameList( names( 'A', 'B', 'C', 'D', 'E' ) ) ).toMatch(
+			/^A, B, C,? and 2 more$/
+		);
+	} );
+
+	it( 'says how far the site can go and what blocks the next version', () => {
+		const message = readinessMessage(
+			{
+				...base,
+				next_ready: '8.3',
+				next_blocked: '8.4',
+				blockers: { 8.4: names( 'Old Plugin' ) },
+			},
+			false
+		);
+		expect( message.lead ).toBe( 'Ready for PHP 8.3:' );
+		expect( message.text ).toContain(
+			'PHP 8.4 has problems in Old Plugin'
+		);
+	} );
+
+	it( 'says what to fix when the next version is blocked', () => {
+		const message = readinessMessage(
+			{
+				...base,
+				next_blocked: '8.4',
+				blockers: { 8.4: names( 'A', 'B' ) },
+			},
+			false
+		);
+		expect( message.lead ).toBe( 'Before PHP 8.4:' );
+		expect( message.text ).toContain( 'A and B' );
+	} );
+
+	it( 'says when everything newer passes', () => {
+		expect(
+			readinessMessage( { ...base, next_ready: '8.5' }, false ).text
+		).toContain( 'every newer version' );
+	} );
+
+	it( 'asks for a full scan when active items were left out', () => {
+		expect( readinessMessage( base, true ).text ).toContain(
+			'Scan the active plugins and theme'
+		);
+	} );
+
+	it( 'names items that could not be checked', () => {
+		expect(
+			readinessMessage(
+				{ ...base, complete: false, unknown: names( 'Broken' ) },
+				false
+			).text
+		).toContain( 'no results for Broken' );
+	} );
+
+	it( 'says nothing on the newest version checked', () => {
+		expect( readinessMessage( base, false ) ).toBeNull();
 	} );
 } );

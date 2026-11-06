@@ -27,6 +27,9 @@ use WP_CLI\Utils;
  *
  *     # Show the problems for one plugin.
  *     $ wp php-compat report broken-link-checker
+ *
+ *     # Which PHP versions the active plugins and theme are ready for.
+ *     $ wp php-compat readiness --format=json
  */
 class CLI_Command {
 
@@ -213,6 +216,88 @@ class CLI_Command {
 		}
 
 		Utils\format_items( $format, $rows, array( 'php', 'file', 'line', 'type', 'message' ) );
+	}
+
+	/**
+	 * Show which PHP versions the active plugins and theme are ready for.
+	 *
+	 * Reads stored results only and never scans, so it's quick to run across
+	 * many sites. The JSON is a versioned document (schema_version); see
+	 * "Reading results across many sites" in the plugin's README. Items nobody
+	 * has scanned are listed as unknown, and "complete" is false.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [--format=<format>]
+	 * : Output format.
+	 * ---
+	 * default: table
+	 * options:
+	 *   - table
+	 *   - json
+	 *   - yaml
+	 * ---
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     # Is this site ready for a newer PHP?
+	 *     $ wp php-compat readiness
+	 *
+	 *     # The full document, for collecting across sites.
+	 *     $ wp php-compat readiness --format=json
+	 *
+	 * @param array $args       Unused.
+	 * @param array $assoc_args Options.
+	 */
+	public function readiness( $args, $assoc_args ) {
+		$report = ( new Scanner() )->readiness_report();
+		$format = Utils\get_flag_value( $assoc_args, 'format', 'table' );
+
+		if ( 'table' !== $format ) {
+			WP_CLI::print_value( $report, array( 'format' => $format ) );
+			return;
+		}
+
+		$names = static function ( $items ) {
+			return implode( ', ', wp_list_pluck( $items, 'name' ) );
+		};
+
+		$rows = array(
+			array( 'php', $report['environment']['php'] ),
+			array( 'complete', $report['complete'] ? 'yes' : 'no' ),
+			array( 'ready_for', implode( ', ', $report['ready_for'] ) ),
+			array( 'next_ready', $report['next_ready'] ),
+			array( 'next_blocked', $report['next_blocked'] ),
+		);
+		// Older versions don't matter for an upgrade; the JSON has them all.
+		$branch = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+		foreach ( $report['blockers'] as $version => $items ) {
+			if ( version_compare( (string) $version, $branch, '>=' ) ) {
+				$rows[] = array( 'blocks ' . $version, $names( $items ) );
+			}
+		}
+		if ( $report['unknown'] ) {
+			$rows[] = array( 'unknown', $names( $report['unknown'] ) );
+		}
+		$rows[] = array( 'source', $report['source'] );
+
+		Utils\format_items(
+			'table',
+			array_map(
+				static function ( $row ) {
+					return array(
+						'field' => $row[0],
+						'value' => $row[1],
+					);
+				},
+				$rows
+			),
+			array( 'field', 'value' )
+		);
+
+		if ( ! $report['complete'] ) {
+			WP_CLI::warning( 'Some active plugins or themes have no results yet. Run a scan in Tools > PHP Compatibility, or wp php-compat scan --active.' );
+		}
 	}
 
 	/**

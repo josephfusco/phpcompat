@@ -733,3 +733,78 @@ export function executiveSummary( items, meta ) {
 
 	return { verdict, steps };
 }
+
+/**
+ * Which PHP versions a set of results is ready for. Mirrors
+ * Scanner::readiness(); both are tested against
+ * tests/fixtures/readiness-cases.json.
+ *
+ * A version is ready when no item fails on it and none requires a newer PHP.
+ *
+ * @param {Object[]} items   Results (type, slug, name, version, status, php: version => pass|fail|not_counted).
+ * @param {string}   current The server's PHP version, any precision.
+ * @return {{complete: boolean, ready_for: string[], next_ready: string, next_blocked: string, blockers: Object<string, Object[]>, unknown: Object[]}} Readiness.
+ */
+export function readiness( items, current ) {
+	const branch = `${ current }`.split( '.' ).slice( 0, 2 ).join( '.' );
+	const unknown = [];
+	const block = {};
+	const all = new Set();
+
+	items.forEach( ( result ) => {
+		const item = {
+			type: result.type,
+			slug: result.slug,
+			name: result.name || result.slug,
+			version: result.version || '',
+		};
+		if ( ! [ 'passes', 'problems' ].includes( result.status ) ) {
+			unknown.push( {
+				type: item.type,
+				slug: item.slug,
+				name: item.name,
+				status: result.status,
+			} );
+			return;
+		}
+		Object.entries( result.php || {} ).forEach(
+			( [ version, outcome ] ) => {
+				all.add( version );
+				// "not_counted": below the item's own minimum, so it won't run there.
+				if ( 'pass' !== outcome ) {
+					( block[ version ] ||= [] ).push( item );
+				}
+			}
+		);
+	} );
+
+	const readyFor = [];
+	const blockers = {};
+	let nextReady = '';
+	let nextBlocked = '';
+	[ ...all ].sort( compareVersions ).forEach( ( version ) => {
+		const blocked = !! block[ version ];
+		if ( blocked ) {
+			blockers[ version ] = block[ version ];
+		} else {
+			readyFor.push( version );
+		}
+		if ( nextBlocked || compareVersions( version, branch ) <= 0 ) {
+			return;
+		}
+		if ( blocked ) {
+			nextBlocked = version;
+		} else {
+			nextReady = version;
+		}
+	} );
+
+	return {
+		complete: ! unknown.length && items.length > 0,
+		ready_for: readyFor,
+		next_ready: nextReady,
+		next_blocked: nextBlocked,
+		blockers,
+		unknown,
+	};
+}

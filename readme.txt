@@ -56,7 +56,7 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 
 = 2. Are there WP-CLI commands available? =
 
-    Yes. Run `wp php-compat scan` to check every plugin and theme (add `--active` for active ones only, or `--format=json`). WP-CLI scans the installed files directly on your server, with the same scanner the scan page uses. It exits with status 1 when problems are found, so it works in scripts and CI. `wp php-compat report <slug>` shows the details, and `wp php-compat php-status` shows the server's PHP status. Run `wp help php-compat` for all options.
+    Yes. Run `wp php-compat scan` to check every plugin and theme (add `--active` for active ones only, or `--format=json`). WP-CLI scans the installed files directly on your server, with the same scanner the scan page uses. It exits with status 1 when problems are found, so it works in scripts and CI. `wp php-compat report <slug>` shows the details, `wp php-compat php-status` shows the server's PHP status, and `wp php-compat readiness` shows which newer PHP the active plugins and theme are ready for (a JSON document hosts can collect across sites). Run `wp help php-compat` for all options.
 
 = 3. A plugin I created is listed as not compatible, what should I do? =
 
@@ -108,6 +108,7 @@ Go to `Tools => PHP Compatibility`, choose what to scan, and click `Scan site`. 
 - Site Health: a test for your active plugins and theme (from stored results; it never scans), and a PHP Compatibility section on the Info tab, so results go into "Copy site info".
 - Flag plugins and themes whose code, or whose Composer dependencies, need a newer PHP than their "Requires PHP" header says.
 - Requires PHP 7.4 and WordPress 6.4.
+- `wp php-compat readiness` shows which newer PHP versions the active plugins and theme are ready for, and what blocks the next one, from stored results. On WP Engine, the scan page's sidebar shows the same after a scan.
 - Hosts can turn scanning off with the `WPEPHPCOMPAT_DISABLE_SCANNING` constant or the `wpephpcompat_scanning_enabled` filter. Stored results, Site Health, and WP-CLI keep working.
 - Only one scan runs per site at a time; a second admin or tab sees who is scanning instead of starting another.
 - Skip `node_modules` and version control folders, whose PHP WordPress never loads. WP-CLI and the scan page check the same files.
