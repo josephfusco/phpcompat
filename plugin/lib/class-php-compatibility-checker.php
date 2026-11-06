@@ -526,6 +526,8 @@ class PHP_Compatibility_Checker {
 								}
 								?>
 							</p>
+							<?php // Filled in after a scan: which newer PHP the active plugins and theme are ready for (queue-manager.js). ?>
+							<p class="wpe-pcc-readiness" hidden></p>
 							<p><?php echo wp_kses_post( __( '<strong>Preview it:</strong> in the User Portal, open this environment and click <strong>Preview PHP</strong>. Only your browser sees the change.', 'php-compatibility-checker' ) ); ?></p>
 							<p><?php echo wp_kses_post( __( '<strong>Or use a copy:</strong> change PHP on a staging or development environment first.', 'php-compatibility-checker' ) ); ?></p>
 							<a target="_blank" class="wpe-pcc-button wpe-pcc-button-primary" href="<?php echo esc_url( $url_wpe_portal ); ?>"><?php echo esc_html( defined( 'PWP_NAME' ) ? __( 'Open this environment', 'php-compatibility-checker' ) : __( 'Open the User Portal', 'php-compatibility-checker' ) ); ?></a>

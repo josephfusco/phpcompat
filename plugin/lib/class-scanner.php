@@ -139,6 +139,155 @@ class Scanner {
 	const STATUSES = array( 'passes', 'problems', 'not_checked', 'not_scanned', 'failed' );
 
 	/**
+	 * Version of the readiness_report() document. Bump it when a field changes
+	 * meaning or is removed; adding fields doesn't need a bump.
+	 */
+	const READINESS_SCHEMA = 1;
+
+	/**
+	 * A site's PHP upgrade readiness, from stored results only.
+	 *
+	 * One self-contained document for collecting results across many sites
+	 * (e.g. `wp php-compat readiness --format=json` on each). It never scans,
+	 * so it's cheap; items nobody has scanned show up in "unknown" and make it
+	 * incomplete. It has no site URL or file contents: whoever runs it already
+	 * knows which site it is.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @return array Document described in README.md ("Reading results across many sites").
+	 */
+	public function readiness_report() {
+		$scan      = $this->scan( $this->get_items( array( 'active_only' => true ) ) );
+		$readiness = self::readiness( $scan['items'], PHP_VERSION );
+
+		$items = array();
+		foreach ( $scan['items'] as $result ) {
+			$items[] = array(
+				'type'             => $result['type'],
+				'slug'             => $result['slug'],
+				'name'             => $result['name'],
+				'version'          => $result['version'],
+				'source'           => $result['source'],
+				'requires_php'     => $result['requires_php'],
+				'status'           => $result['status'],
+				'failing_versions' => $result['failing_versions'],
+				'needs_php'        => $result['needs_php'],
+				'scanned_at'       => $result['scanned_at'],
+			);
+		}
+
+		return array_merge(
+			array(
+				'schema_version'  => self::READINESS_SCHEMA,
+				'generated_at'    => gmdate( 'c' ),
+				'plugin_version'  => defined( 'WPEPHPCOMPAT_VERSION' ) ? WPEPHPCOMPAT_VERSION : '',
+				'source'          => $scan['source'],
+				'environment'     => array(
+					'php'       => PHP_VERSION,
+					'wordpress' => get_bloginfo( 'version' ),
+					'multisite' => is_multisite(),
+				),
+				'scope'           => 'active',
+				'summary'         => $scan['summary'],
+				'max_php_checked' => $scan['max_php_checked'],
+			),
+			$readiness,
+			array( 'items' => $items )
+		);
+	}
+
+	/**
+	 * Which PHP versions a set of results is ready for.
+	 *
+	 * A version is ready when no item fails on it and none requires a newer
+	 * PHP. Mirrored by readiness() in src/js/include/report-model.js; both are
+	 * tested against tests/fixtures/readiness-cases.json.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param array[] $results Results from scan_item(), usually the active plugins and theme.
+	 * @param string  $current The server's PHP version (any precision, e.g. "8.2.35").
+	 * @return array {
+	 *     @type bool     $complete     Whether every item has results (passes or problems).
+	 *     @type string[] $ready_for    Checked versions every item with results passes, oldest first.
+	 *     @type string   $next_ready   Newest version above $current reachable without crossing a
+	 *                                  blocked one, or empty.
+	 *     @type string   $next_blocked First version above $current that isn't ready, or empty.
+	 *     @type array    $blockers     Version => items (type, slug, name, version) that block it.
+	 *     @type array[]  $unknown      Items without usable results (type, slug, name, status).
+	 * }
+	 */
+	public static function readiness( array $results, $current ) {
+		$parts   = explode( '.', (string) $current );
+		$branch  = $parts[0] . ( isset( $parts[1] ) ? '.' . $parts[1] : '' );
+		$unknown = array();
+		$block   = array();
+		$all     = array();
+
+		foreach ( $results as $result ) {
+			$item = array(
+				'type'    => (string) $result['type'],
+				'slug'    => (string) $result['slug'],
+				'name'    => isset( $result['name'] ) ? (string) $result['name'] : (string) $result['slug'],
+				'version' => isset( $result['version'] ) ? (string) $result['version'] : '',
+			);
+
+			if ( ! in_array( $result['status'], array( 'passes', 'problems' ), true ) ) {
+				$unknown[] = array(
+					'type'   => $item['type'],
+					'slug'   => $item['slug'],
+					'name'   => $item['name'],
+					'status' => (string) $result['status'],
+				);
+				continue;
+			}
+
+			foreach ( (array) $result['php'] as $version => $outcome ) {
+				$version         = (string) $version;
+				$all[ $version ] = true;
+				// "not_counted": below the item's own minimum, so it won't run there.
+				if ( 'pass' !== $outcome ) {
+					$block[ $version ][] = $item;
+				}
+			}
+		}
+
+		$versions = array_keys( $all );
+		usort( $versions, 'version_compare' );
+
+		$ready        = array();
+		$blockers     = array();
+		$next_ready   = '';
+		$next_blocked = '';
+		foreach ( $versions as $version ) {
+			if ( empty( $block[ $version ] ) ) {
+				$ready[] = $version;
+			} else {
+				$blockers[ $version ] = $block[ $version ];
+			}
+
+			if ( '' !== $next_blocked || ! version_compare( $version, $branch, '>' ) ) {
+				continue;
+			}
+			if ( empty( $block[ $version ] ) ) {
+				$next_ready = $version;
+			} else {
+				$next_blocked = $version;
+			}
+		}
+
+		return array(
+			'complete'     => ! $unknown && (bool) $results,
+			'ready_for'    => $ready,
+			'next_ready'   => $next_ready,
+			'next_blocked' => $next_blocked,
+			'blockers'     => $blockers,
+			'unknown'      => $unknown,
+		);
+	}
+
+	/**
 	 * Where results come from, included in scan output.
 	 *
 	 * @return string

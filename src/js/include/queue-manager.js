@@ -6,6 +6,7 @@ import {
 } from './render';
 import $ from 'jquery';
 import { hideDownload, showDownload } from './download';
+import { showReadiness, hideReadiness } from './readiness-note';
 import { __, sprintf } from '@wordpress/i18n';
 import {
 	scanItem,
@@ -47,6 +48,7 @@ export function initQueue( itemsToScan, mode ) {
 	resetProgress();
 	$( '.wpe-pcc-playground' ).hide();
 	$( '.wpe-pcc-information' ).hide();
+	hideReadiness();
 	$( '#testResults' ).val( '' );
 
 	const include = ( item ) => 'yes' !== mode || 'yes' === item.active;
@@ -184,6 +186,13 @@ export function runNextJob() {
 			.prop( 'disabled', false )
 			.removeClass( 'button-primary' )
 			.val( __( 'Scan again', 'php-compatibility-checker' ) );
+
+		// WP Engine sidebar: which newer PHP the active code is ready for.
+		showReadiness(
+			window.checkerList,
+			window.phpcompat.report,
+			window.checkerList.site.php
+		);
 
 		// Only offer help when something actually failed.
 		if ( $( '[data-result="problems"]' ).length ) {
