@@ -155,7 +155,7 @@ class Scanner {
 	 *
 	 * @since 2.0.0
 	 *
-	 * @return array Document described in README.md ("Reading results across many sites").
+	 * @return array Document described in docs/readiness.md.
 	 */
 	public function readiness_report() {
 		$scan      = $this->scan( $this->get_items( array( 'active_only' => true ) ) );

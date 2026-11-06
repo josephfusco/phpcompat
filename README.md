@@ -2,21 +2,15 @@
 
 [![CI](https://github.com/josephfusco/phpcompat/actions/workflows/ci.yml/badge.svg)](https://github.com/josephfusco/phpcompat/actions/workflows/ci.yml)
 
-A WordPress plugin that checks whether the plugins and themes on a site work with newer versions of PHP. It's on WordPress.org as [PHP Compatibility Checker](https://wordpress.org/plugins/php-compatibility-checker/) and has around 200,000 active installs.
+A WordPress plugin that checks whether a site's plugins and themes work on PHP 7.4 through 8.5. It's on WordPress.org as [PHP Compatibility Checker](https://wordpress.org/plugins/php-compatibility-checker/), with around 200,000 active installs. This fork is where it's maintained before changes go upstream to [wpengine/phpcompat](https://github.com/wpengine/phpcompat).
 
-It runs the PHP community's standard compatibility checker, [PHPCompatibility](https://github.com/PHPCompatibility/PHPCompatibility) on [PHP_CodeSniffer](https://github.com/PHPCSStandards/PHP_CodeSniffer), with the WordPress ruleset [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP), against PHP 7.4 through 8.5. It checks every plugin and theme: WordPress.org, premium, and custom. The check runs in the admin's browser, in PHP compiled to WebAssembly, so it barely uses the host's resources and needs no outside service.
-
-This fork is actively maintained. It's where fixes are developed before being proposed upstream to [wpengine/phpcompat](https://github.com/wpengine/phpcompat).
+<p align="center">
+  <img src=".github/images/scan-results.png" alt="Scan results: Broken Link Checker fails every PHP version and its PHP 8.4 problems are open, listing file, line and message; other plugins pass." width="800">
+</p>
 
 ## How it works
 
-The plugin adds **Tools → PHP Compatibility** to wp-admin. Choose **Only scan active plugins and theme**, **Scan all plugins and themes**, or **Choose which plugins and themes to scan**, then click **Scan site**.
-
-<p align="center">
-  <img src=".github/images/scan-in-progress.png" alt="A scan in progress: finished plugins show a pass or fail chip for each PHP version, the current one shows files checked and a progress bar, and the rest are waiting." width="800">
-</p>
-
-The scan runs in the admin's browser. The plugin ships PHP 8.3 compiled to WebAssembly ([`@php-wasm/web-8-3`](https://www.npmjs.com/package/@php-wasm/web-8-3), from WordPress Playground) and runs its own copy of PHP_CodeSniffer and PHPCompatibilityWP inside a Web Worker. The site only lists and reads files. The CPU work of checking them happens on the admin's computer, and the code never leaves the site and that browser.
+It runs [PHPCompatibilityWP](https://github.com/PHPCompatibility/PHPCompatibilityWP) on every plugin and theme, including premium and custom code, and shows the file, line, and reason for each problem. The scan runs in the admin's browser, in PHP compiled to WebAssembly: the site only reads files, so it barely uses the host's resources, and nothing is sent to an outside service.
 
 ```mermaid
 flowchart LR
@@ -37,298 +31,38 @@ flowchart LR
 
 <sub>Blue runs on the WordPress site. Orange runs in the admin's browser.</sub>
 
-Step by step:
+Results are stored and reused until a plugin's files change. They also feed Site Health, PDF/CSV/JSON reports, WP-CLI, and the Abilities API.
 
-1. **Start PHP.** On the first scan the page downloads the scanner's files (`GET /scanner-bundle`), checks them against the SHA-256 in the plugin's build manifest, and keeps them in the browser's Cache Storage. The PHP runtime (`build/php-wasm/`, about 18 MB) loads from the plugin's own folder and the browser caches it. Both download again only when the plugin is updated. Browsers with JSPI (Chrome, Edge) use that build; Firefox and Safari use the Asyncify build.
-2. **Plan.** The first request for each item (`POST /scan-batch`) returns the stored result if the item's files haven't changed, otherwise how many PHP files it has.
-3. **Batches.** Each following request returns the next few PHP files. The worker writes them into PHP's in-memory file system and runs `runner.php`, the same file WP-CLI runs on the server. PHP inside the worker has no network access and no WordPress; it reads those files and prints JSON.
-4. **Per-version results.** `runner.php` runs PHPCompatibilityWP once per PHP version (`testVersion` 7.4, 8.0, … 8.5), so each result means "this code breaks on PHP 8.x". To keep that fast, a first pass checks every file against the whole range and only the files it flags get the per-version passes.
-5. **Merge and store.** The browser merges the batches. Each item gets a status (Passes, Problems found, Not checked) and a chip per PHP version. Versions below the item's own "Requires PHP" are shown as not counted. Errors fail a version; warnings (deprecations) are listed but still pass. Selecting a failing version shows the file, line, and message for each problem. The result is saved (`POST /results`) with the item's version, the scanner's rule set, and a fingerprint of its PHP files (paths, sizes, modification times). Later scans reuse it until any of those change.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant P as Scan page
-    participant W as Web Worker (PHP in WebAssembly)
-    participant S as WordPress site
-    P->>S: GET /scanner-bundle (first scan only, then cached)
-    P->>W: start PHP, load scanner
-    W->>W: check scanner against build SHA-256
-    loop each plugin or theme
-        P->>S: POST /scan-batch (plan)
-        alt files unchanged
-            S-->>P: stored result
-        else changed or never scanned
-            loop until every file is checked
-                P->>S: POST /scan-batch (cursor)
-                S-->>P: next few files
-                P->>W: scan these files
-                W-->>P: problems per PHP version
-            end
-            P->>S: POST /results
-        end
-    end
-    P->>S: DELETE /scan-lock
-```
-
-<p align="center">
-  <img src=".github/images/scan-results.png" alt="Scan results: Broken Link Checker fails every PHP version and its PHP 8.4 problems are open, listing file, line and message; other plugins pass, and Contact Form 7 shows dashes for versions below its minimum." width="800">
-</p>
-
-The results also feed:
-
-- **Site Health** (Tools → Site Health): a test for the active plugins and theme, and a PHP Compatibility section on the Info tab. It reads stored results and never scans.
-- **"Requires PHP" checks**: an item whose code only passes from a newer PHP than its header says, or whose `vendor/composer/platform_check.php` requires one, gets a note. Both sources keep themselves current.
-- **WP-CLI and the Abilities API**, which read the same stored results.
-
-| PDF report | Site Health |
-| --- | --- |
-| ![The PDF report: a summary with next steps, then every plugin and theme at a glance.](.wordpress-org/screenshot-2.png) | ![Site Health: active plugins and themes with problems on newer PHP.](.wordpress-org/screenshot-3.png) |
-
-### Built for shared hosting
-
-The plugin moved to an outside service (WP Engine's Tide, now retired) because 1.5 scanned on the site from WP-Cron with no time limit, which caused noisy-neighbor problems. 2.0 doesn't need a service: the expensive part runs in the browser, and what's left on the site is reading files.
-
-```mermaid
-flowchart TB
-    subgraph v15["1.5: on the site"]
-        a1["WP-Cron"] --> a2["phpcs on the server<br/>no time limit"]
-    end
-    subgraph v16["1.6: outside service"]
-        b1["Site"] --> b2["Tide API<br/>WordPress.org code only,<br/>stopped at PHP 8.0"]
-    end
-    subgraph v20["2.0: in the browser"]
-        c1["Site reads files"] --> c2["Admin's browser runs phpcs<br/>in WebAssembly"]
-    end
-    v15 ~~~ v16 ~~~ v20
-    classDef site fill:#e7f0fa,stroke:#2271b1,color:#1d2327
-    classDef browser fill:#fcf0e3,stroke:#b26200,color:#1d2327
-    classDef outside fill:#f0f0f1,stroke:#8c8f94,color:#1d2327
-    class a1,a2,b1,c1 site
-    class b2 outside
-    class c2 browser
-```
-
-Locally, Broken Link Checker (569 PHP files) takes about 22 seconds. The site spends 2.2 seconds of that reading files, over 16 requests, the longest 0.17 seconds. Scanning the same plugin on the server took about 10 seconds with requests up to 3.7 seconds, so a scan takes longer but the site does a fraction of the work. Results are identical to a server-side scan in Chromium, Firefox, and WebKit.
-
-Scanning is a resumable batch job, using the usual patterns for that:
-
-- **Only while the page is open.** No cron and no background jobs.
-- **One scan per site, one request in flight.** A short lock (renewed by each request, gone two minutes after the last) keeps a second admin or tab from starting another scan, and each scan sends one request at a time, so it holds at most one PHP worker.
-- **Server-side caps**: every batch is limited to 100 files and 1 MB, whatever the browser asks for.
-- **Adaptive batch size**: each batch (request plus checking) aims for about 2 seconds, grows (at most 1.5×) while batches are fast, and halves after a slow or failed one.
-- **Pacing**: after a slow request, it waits a quarter of that time (at most 3 seconds) before the next, so a busy host has room for visitors.
-- **Progress you can see**: each item shows files checked, a progress bar, an estimate of the time left, and "still working…" if a batch takes longer than 10 seconds.
-- **Retries with exponential backoff and jitter** on 429, 503, timeouts, and dropped connections, honoring `Retry-After`.
-- **Poison-file isolation**: a batch that crashes PHP in the worker is split until the file causing it is found; that file is skipped and listed, and the worker restarts PHP. If more than a few files crash, the item fails instead of passing.
-- **Optimistic concurrency**: if an item's files change mid-scan, the server answers 409 and the item starts again.
-- **Integrity check**: the worker refuses scanner files that don't match the build's SHA-256, and the site checks its own copy once a day per build, so a missing or incomplete install says to reinstall instead of failing on every file.
-- **An off switch**: `define( 'WPEPHPCOMPAT_DISABLE_SCANNING', true );` in `wp-config.php`, or the `wpephpcompat_scanning_enabled` filter, turns scanning off. Stored results, Site Health, and WP-CLI keep working.
-
-### Limitations
-
-- **Static analysis.** Code isn't executed. Code paths that exist for backwards compatibility can show up as failures, and runtime problems won't show up at all.
-- **PHPCompatibility 10 is in alpha.** It's the release line with PHP 8.1–8.5 checks; coverage of some PHP 8.3–8.5 changes is still being added upstream. The exact versions are in every report and in `build/scanner.json`.
-- **The browser does the work.** WebAssembly PHP is about 3–4× slower per file than native PHP, so a first scan of a large site takes a few minutes and the tab has to stay open. Later scans only check what changed. WP-CLI (`wp php-compat scan`) runs the same scanner natively on the server.
-- **A bigger plugin.** The bundled PHP runtime makes the zip about 15 MB.
-- **Multisite.** Only super admins can scan from the page, because scanning reads plugin code.
+More: [how a scan works and why it's safe on shared hosting](docs/how-it-works.md).
 
 ## WP-CLI
 
 ```bash
-wp php-compat scan                      # Every plugin and theme, scanned now
-wp php-compat scan --active             # Active items only
-wp php-compat scan akismet --format=json
-wp php-compat scan --cached             # Stored results only, no scanning
+wp php-compat scan --active             # Scan active plugins and theme (exits 1 on problems)
 wp php-compat report wp-optimize --php=8.4
-wp php-compat php-status
-wp php-compat readiness --format=json   # Which newer PHP the active code is ready for
+wp php-compat readiness --format=json   # Which newer PHP the site is ready for
 ```
 
-WP-CLI has no browser and no time limit, so `scan` runs the same `runner.php` natively and in-process on the installed files (no `exec()` needed) and stores the results. `scan` exits with status 1 when any item has problems, so it can gate deploys or run across many sites.
-
-## Reading results across many sites
-
-`wp php-compat readiness` answers "can this site move to a newer PHP, and what's in the way?" for the active plugins and theme. It only reads stored results (from the scan page or `wp php-compat scan`) and never scans, so it's quick and safe to run on every site in a fleet. The output is one self-contained document per site with no site URL and no file contents: whoever runs it already knows which site it is.
-
-```bash
-wp php-compat readiness                 # Summary table
-wp php-compat readiness --format=json   # The full document
-```
-
-```json
-{
-  "schema_version": 1,
-  "generated_at": "2026-11-06T13:25:23+00:00",
-  "plugin_version": "2.0.0",
-  "source": "PHPCompatibilityWP (phpcs-4.0.4+phpcompatibility-10.0.0-alpha2+wp-3.0.0-alpha2)",
-  "environment": { "php": "8.3.35", "wordpress": "7.1.4", "multisite": false },
-  "scope": "active",
-  "summary": { "passes": 6, "problems": 4, "not_checked": 0, "not_scanned": 0, "failed": 0 },
-  "max_php_checked": "8.5",
-  "complete": true,
-  "ready_for": [],
-  "next_ready": "",
-  "next_blocked": "8.4",
-  "blockers": {
-    "8.4": [
-      { "type": "plugin", "slug": "broken-link-checker", "name": "Broken Link Checker", "version": "2.4.15" },
-      { "type": "plugin", "slug": "wp-optimize", "name": "WP-Optimize - Clean, Compress, Cache", "version": "4.7.0" }
-    ]
-  },
-  "unknown": [],
-  "items": [
-    { "type": "plugin", "slug": "akismet", "name": "Akismet Anti-spam: Spam Protection", "version": "5.7.2", "source": "wporg", "requires_php": "7.2", "status": "passes", "failing_versions": [], "needs_php": null, "scanned_at": "2026-11-06T13:03:47+00:00" }
-  ]
-}
-```
-
-(`blockers` and `items` are shortened here.)
-
-| Field | Meaning |
-| --- | --- |
-| `complete` | Every active plugin and theme has results. When it's `false`, the ones without are in `unknown` (with their `status`) and the readiness fields only cover the rest. |
-| `ready_for` | Checked PHP versions on which no active item fails and none requires a newer PHP, oldest first. |
-| `next_ready` | The newest version above the server's PHP that the site can reach without crossing a blocked one. Empty if the very next version is blocked, or the server is already on the newest version checked. |
-| `next_blocked` | The first version above the server's PHP that isn't ready. Empty if none is. |
-| `blockers` | Version => the items that fail on it, or that require a newer PHP than it. Every checked version is listed, including those below the server's PHP. |
-| `items` | Each active item's status, failing versions, `needs_php` (when its code needs a newer PHP than its header says), and when it was scanned. |
-| `source`, `max_php_checked` | The scanner and rule set behind the results, and the newest PHP version they cover. Results are only as current as the rule set. |
-
-`schema_version` goes up when a field is removed or changes meaning. New fields can be added without a bump, so consumers should ignore fields they don't know. The logic lives in `Scanner::readiness()` and is mirrored in JavaScript; both are tested against `tests/fixtures/readiness-cases.json`.
-
-On WP Engine, the scan page's sidebar shows the same answer after each scan ("Ready for PHP 8.4", or "Before PHP 8.4: update or replace …"), next to the link for previewing PHP in the User Portal.
-
-## Abilities API (AI agents)
-
-On WordPress 6.9+ the plugin registers two [abilities](https://developer.wordpress.org/apis/abilities/) in the `php-compatibility` category. Agents and other clients can discover and run them over REST (`/wp-abilities/v1/`) or through an MCP adapter:
-
-| Ability | What it returns |
-| --- | --- |
-| `php-compatibility-checker/scan` | Stored results per plugin and theme (`passes`, `problems`, `not_checked`, `not_scanned`, `failed`), results per PHP version, `scanned_at`, and optional problem details. Input: `slugs`, `type`, `active_only`, `include_details`. |
-| `php-compatibility-checker/php-status` | The server's PHP version, whether WordPress considers it secure and at its recommended version, and `release`: whether it's the latest release of a supported branch (from php.net) and any critical advisories that affect it. `release.state` is `vulnerable`, `up_to_date`, `update_available`, `unsupported_branch`, `vendor_build`, or `unknown`. |
-
-Both are read-only and require an administrator (`manage_options`). Scanning takes longer than a REST request allows, so the scan ability returns stored results: `not_scanned` means nobody has scanned that version yet. The output includes `max_php_checked`, the newest PHP version checked, so an agent doesn't treat a pass as readiness for versions that weren't checked.
-
-## Server PHP release status
-
-Static compatibility results don't tell you whether the server's PHP itself is patched. WordPress's own PHP check works at the branch level (it treats any 8.3 release as secure). The plugin also compares the exact version with php.net's release data ([`releases/states.php`](https://www.php.net/releases/states.php) and [`releases/active.php`](https://www.php.net/releases/active.php), cached for 12 hours), and with a short list of critical advisories that php.net's data can't express:
-
-- **vulnerable:** affected by a critical advisory, such as [PHP2Shell](https://www.cisa.gov/news-events/alerts/2026/10/21/critical-vulnerabilities-php-require-immediate-patching) (CVE-2026-109618 and CVE-2026-109619, unauthenticated remote code execution, actively exploited, fixed in 8.2.35, 8.3.36, 8.4.27, and 8.5.12). Works even when php.net is unreachable.
-- **update_available:** a newer patch release exists (flagged when it's a security release).
-- **unsupported_branch:** the branch no longer gets security fixes (e.g. 7.4, 8.1). Critical advisories without a fix for that branch are named.
-- **vendor_build:** a host or Linux distribution build (e.g. `8.3.6-0ubuntu…`) that may include backported fixes, so it isn't reported as outdated; the advisory's CVEs are listed to confirm with the host.
-- **up_to_date** or **unknown** (php.net unreachable).
-
-Advisories that depend on configuration are only shown when the server's settings match. For example, CVE-2026-115560 (no fix yet) needs `session.upload_progress.enabled` on and `session.serialize_handler` set to `php_binary` or `php_serialize`; when they are, the page shows the workaround.
-
-The scan page shows a notice for each of these. The same data is in `wp php-compat php-status` and the `php-status` ability, so hosts can check a whole fleet. Advisories live in `Php_Releases::advisories()` and can be changed with the `wpephpcompat_php_advisories` filter.
-
-## Code map
-
-| Path | What it is |
-| --- | --- |
-| `plugin/wpengine-phpcompat.php` | Bootstrap: constants, autoloader, activation, upgrade, and migration hooks |
-| `plugin/lib/class-php-compatibility-checker.php` | Admin page, script loading, and the list of plugins and themes to scan, with filters |
-| `plugin/lib/class-scanner.php` | Server-side scanner: turns reports into statuses, scans installed files for WP-CLI, and works out PHP upgrade readiness (used by WP-CLI and abilities) |
-| `plugin/lib/class-scanner-bundle.php` | The bundled scanner: rule set, PHP versions, the off switch, browser settings (worker and runtime URLs), the files for `GET /scanner-bundle`, and in-process runs for WP-CLI |
-| `plugin/lib/class-results.php` | Stored results, one non-autoloaded option per plugin or theme |
-| `plugin/lib/class-site-health.php` | Site Health test and Info section |
-| `plugin/lib/class-rest-controller.php` | `php-compat/v1` REST routes: `/scan-batch` (files in batches), `/scanner-bundle`, `/results`, and `/scan-lock` |
-| `plugin/lib/class-cli-command.php` | `wp php-compat` commands |
-| `plugin/lib/class-abilities.php` | Abilities API registration |
-| `plugin/lib/class-php-releases.php` | Server PHP release status from php.net and critical advisories (latest patch release, branch end of life, PHP2Shell) |
-| `src/js/scan.js` | Page wiring: buttons and toggles |
-| `src/js/include/queue-manager.js` | Scan queue: one item at a time |
-| `src/js/include/scanner.js` | Batched scanning: requests, sizing, retries, skipping, merging |
-| `src/js/include/wasm-engine.js` | Starts the worker, caches the scanner's files in Cache Storage, and passes batches to it with timeouts |
-| `src/js/wasm-worker.js` | Web Worker: loads PHP in WebAssembly, checks the scanner against its SHA-256, runs `runner.php` on each batch, and restarts PHP after a crash |
-| `src/js/include/report-model.js` | What goes in a report (labels, grouping, wording), shared by the PDF and the printable page, and `readiness()` |
-| `src/js/include/readiness-note.js` | The WP Engine sidebar's "Ready for PHP …" note after a scan |
-| `tools/phpcs-bundle/` | Pinned phpcs + PHPCompatibilityWP (`composer.lock`), `runner.php`, `collect-report.php`, and `build.php`, which writes `plugin/build/scanner/` and `scanner.json` (plain files: WordPress.org doesn't accept archives in plugins) |
-| `src/js/include/render.js` | Results rendering (Mustache template in the PHP class) |
-| `plugin/build/` | Compiled assets, the scanner, and the PHP WebAssembly runtime in `php-wasm/` (git-ignored; created by `npm run build`) |
-| `tests/*Test.php` | PHP unit tests (PHPUnit + Brain Monkey) |
-| `tests/e2e/` | Playwright end-to-end tests and the wp-env test fixture plugin |
-
-### Filters
-
-- `phpcompat_excluded_plugins` and `phpcompat_excluded_themes`: names to leave out of scans.
-- `phpcompat_plugins_to_scan` and `phpcompat_themes_to_scan`: the final lists sent to the browser.
-- `wpephpcompat_pre_scan_report`: supply a report for an item instead of scanning it (scan page and WP-CLI), e.g. results your host already has.
-- `wpephpcompat_php_advisories`: the critical PHP advisories checked against the server.
-- `wpephpcompat_scanning_enabled`: return `false` to turn off scanning from the page (same as `WPEPHPCOMPAT_DISABLE_SCANNING`).
-- `wpephpcompat_wasm_base_url`: where the browser loads the PHP WebAssembly runtime from (defaults to the plugin's `build/php-wasm/`).
+`readiness` reads stored results only, so hosts can run it across many sites. See [reading results across many sites](docs/readiness.md) and the [full reference](docs/reference.md) (all commands, Abilities API, PHP release status, filters).
 
 ## Local development
 
-Requirements: [Docker](https://www.docker.com/), Node.js 24 (`nvm use`), PHP 8.3+, and [Composer](https://getcomposer.org/).
+Requires Docker, Node.js 24 (`nvm use`), PHP 8.3+, and Composer.
 
 ```bash
-npm ci
-composer install
-npm run build
+npm ci && composer install && npm run build
 npx wp-env start
 ```
 
-WordPress runs at http://localhost:8888/wp-admin (user `admin`, password `password`), with the plugin mounted from `plugin/`. Go to **Tools → PHP Compatibility** and click **Scan**.
-
-To have more to scan, install a few plugins:
+WordPress runs at http://localhost:8888/wp-admin (`admin` / `password`). Go to **Tools → PHP Compatibility** and click **Scan site**.
 
 ```bash
-npx wp-env run cli wp plugin install akismet contact-form-7 wordpress-seo --activate
+composer test && composer lint       # PHP unit tests and coding standards
+npm run test:unit && npm run lint:js # JS unit tests and lint
+npm run test:e2e                     # Playwright, on a separate site at :8889
 ```
 
-`npm start` rebuilds assets on change. `npx wp-env stop` stops the containers, and `npx wp-env destroy` resets everything.
-
-## Tests and linting
-
-```bash
-composer test          # PHP unit tests
-composer lint          # WordPress Coding Standards + PHPCompatibility 7.4+
-composer lint:fix      # Auto-fix PHP lint issues
-npm run lint:js        # ESLint (WordPress config)
-npm run lint:css       # Stylelint (WordPress config, design token rules)
-npm run test:e2e       # Playwright end-to-end tests
-npm run test:e2e:debug # Same, with the Playwright inspector
-```
-
-The end-to-end tests run against a separate wp-env site defined in `.wp-env.tests.json` (http://localhost:8889, started automatically), so your development site isn't touched. A small must-use plugin (`tests/e2e/fixtures/phpcompat-e2e.php`) is mapped into that site only. It supplies a fixed list of plugins and themes, fixture scan reports for WP-CLI, and switches for the WP Engine sidebar and a test advisory. Most browser tests replace the scanner with the same fixture reports, so they can hold or fail a scan on cue; one test runs the real batched scanner through `/scan-batch`, where the fixture plugin answers with those reports, and checks that nothing is loaded from another site. `tests/RunnerTest.php` runs real scans with the bundled scanner on a fixture plugin (run `composer install -d tools/phpcs-bundle` first).
-
-CI runs all of these on every pull request. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
-## Tooling
-
-The build and tests use WordPress's own maintained tooling, so there's little for this project to keep up to date:
-
-- [`@wordpress/scripts`](https://www.npmjs.com/package/@wordpress/scripts) for the build (webpack, Babel, Sass), ESLint, Stylelint, and Playwright config.
-- [`@wordpress/env`](https://www.npmjs.com/package/@wordpress/env) for local and test WordPress sites.
-- [`@wordpress/e2e-test-utils-playwright`](https://www.npmjs.com/package/@wordpress/e2e-test-utils-playwright) for end-to-end tests.
-- WordPress design tokens (`--wpds-*`), with fallbacks for older WordPress added at build time by `@wordpress/theme` (`postcss.config.js`).
-- Core SVG icons via `wp_get_icon()` (WordPress 7.1+), with Dashicons on older versions.
-- `jquery`, `wp-i18n`, and `wp-api-fetch` are loaded from WordPress, not bundled.
-- The scanner itself is a Composer project in `tools/phpcs-bundle` with a lock file, built into the plugin by `npm run build`.
-
-## Automation
-
-| Workflow | What it does |
-| --- | --- |
-| [CI](.github/workflows/ci.yml) | Lint, unit tests on PHP 8.3 and 8.4, a build check (including that no archives ship, which WordPress.org rejects), WordPress.org's Plugin Check on the build, and end-to-end tests |
-| [Dependabot](.github/dependabot.yml) and [auto-merge](.github/workflows/dependabot-auto-merge.yml) | Weekly dependency updates. Dev-only minor and patch updates merge automatically once CI passes. Scanner updates (`tools/phpcs-bundle`) always get a human review, since they change results. |
-| [Tested up to](.github/workflows/tested-up-to.yml) | Weekly. Opens a PR when a new WordPress version ships. |
-
-The scheduled workflows and auto-merge only run on `wpengine/phpcompat`.
-
-## WordPress.org assets
-
-`.wordpress-org/` holds the listing's banner, icons, and screenshots (`screenshot-1.png` to `screenshot-3.png`, matching the captions in `readme.txt`). They go in the SVN repository's `/assets` folder, not in the plugin zip.
-
-## Building a release zip
-
-```bash
-npm run build
-cd plugin && zip -r ../php-compatibility-checker.zip . -x '*.map'
-```
+Code map, test setup, tooling, and releases: [docs/development.md](docs/development.md).
 
 ## Security
 
