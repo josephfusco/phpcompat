@@ -223,7 +223,7 @@ class CLI_Command {
 	 *
 	 * Reads stored results only and never scans, so it's quick to run across
 	 * many sites. The JSON is a versioned document (schema_version); see
-	 * "Reading results across many sites" in the plugin's README. Items nobody
+	 * docs/readiness.md in the plugin's GitHub repository. Items nobody
 	 * has scanned are listed as unknown, and "complete" is false.
 	 *
 	 * ## OPTIONS
