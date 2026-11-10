@@ -110,7 +110,8 @@ $color-border: #c3c4c7;
 	}
 
 	&-aside {
-		// The main column is width: 100%; without a minimum, the table layout squeezes this.
+		// The main column is width: 100%; without a minimum, the table
+		// layout squeezes this.
 		min-width: 277px;
 		width: 277px;
 
