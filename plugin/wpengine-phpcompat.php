@@ -53,6 +53,9 @@ function wpe_phpcompat_loader() {
 	// Site Health: a test for active plugins and the theme, and an Info section.
 	Site_Health::init();
 
+	// Host details beside the scan results (WP Engine, or any host via wpephpcompat_host).
+	Hosting::init();
+
 	// WP-CLI: wp php-compat scan|report|php-status.
 	if ( defined( 'WP_CLI' ) && WP_CLI ) {
 		\WP_CLI::add_command( 'php-compat', CLI_Command::class );

@@ -110,26 +110,28 @@ $color-border: #c3c4c7;
 	}
 
 	&-aside {
+		// The main column is width: 100%; without a minimum, the table layout squeezes this.
+		min-width: 277px;
 		width: 277px;
 
 		h2 {
-			line-height: 1.15;
-			text-transform: capitalize;
-
-			&:first-child {
-				margin-top: 0;
-			}
+			font-size: 14px;
+			line-height: 1.4;
+			margin: 0 0 8px;
 		}
 
 		&-content {
-			border: 1px solid #babec3;
-			padding: 20px;
-			margin-top: 20px;
-			margin-bottom: 20px;
+			background: $color-background;
+			border: 1px solid $color-border;
+			padding: 16px;
+			margin-bottom: 16px;
 
 			p {
-				margin: 0;
-				padding: 0;
+				margin: 0 0 8px;
+
+				&:last-child {
+					margin-bottom: 0;
+				}
 			}
 		}
 	}
@@ -150,47 +152,6 @@ $color-border: #c3c4c7;
 		}
 	}
 
-	&-logo {
-		display: block;
-		max-width: 182px;
-		text-align: center;
-		margin: 0 auto;
-	}
-
-	&-get-hosting {
-		background: #e8e9ea;
-	}
-
-	&-button {
-		display: block;
-		padding: 15px;
-		margin-top: 20px;
-		margin-bottom: 20px;
-		text-transform: uppercase;
-		font-weight: 700;
-		font-size: 14px;
-		text-align: center;
-		background: #40bac8;
-		color: #fff;
-		text-decoration: none;
-
-		&:hover,
-		&:focus {
-			text-decoration: none;
-			cursor: pointer;
-			background: #3199a5;
-			color: #fff;
-		}
-
-		&-primary {
-			background: #eb6126;
-
-			&:hover,
-			&:focus {
-				background: #bf4a18;
-			}
-		}
-	}
 }
 
 .rtl {
@@ -234,11 +195,6 @@ $color-border: #c3c4c7;
 	}
 }
 
-input.wpe-pcc-button {
-	display: block;
-	border: 0 none;
-	width: 100%;
-}
 // Additions since 1.6.4, in the same style.
 $color-warning: #dba617;
 
