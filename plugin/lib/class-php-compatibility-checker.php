@@ -363,16 +363,13 @@ class PHP_Compatibility_Checker {
 		// Whether the server's PHP is the latest release of a supported branch.
 		$release = ( new Php_Releases() )->get_status();
 
-		// Links for the WP Engine sidebar, shown only on sites hosted on WP Engine.
-		$url_wpe_portal          = $this->get_wpe_portal_url( 'php_compatibility_checker_user_portal' );
-		$url_wpe_logo            = $this->get_wpe_portal_url( 'php_compatibility_checker_logo' );
-		$url_wpe_php_guide       = 'https://wpeng.in/407b79/'; // Short link already carries campaign tracking.
-		$url_wpe_agency_partners = $this->add_wpe_campaign( 'https://wpengine.com/agency-directory/', 'php_compatibility_checker_agency_partners' );
+		// Host details for the panel beside the results, or null for no panel.
+		$host = Hosting::get();
 		?>
 
 		<div class="wrap wpe-pcc-wrap">
 			<h1><?php esc_html_e( 'PHP Compatibility Checker', 'php-compatibility-checker' ); ?></h1>
-			<div class="wpe-pcc-layout<?php echo function_exists( '\\is_wpe' ) && \is_wpe() ? ' wpe-pcc-has-aside' : ''; ?>">
+			<div class="wpe-pcc-layout<?php echo $host ? ' wpe-pcc-has-aside' : ''; ?>">
 			<div class="wpe-pcc-main">
 				<p><?php esc_html_e( 'The PHP Compatibility Checker can be used on any WordPress website on any web host.', 'php-compatibility-checker' ); ?></p>
 				<p>
@@ -489,60 +486,53 @@ class PHP_Compatibility_Checker {
 				</div> <!-- /wpe-pcc-footer -->
 			</div> <!-- /wpe-pcc-main -->
 
-			<?php if ( function_exists( '\is_wpe' ) && \is_wpe() ) : ?>
+			<?php if ( $host ) : ?>
 				<div class="wpe-pcc-aside">
-					<a class="wpe-pcc-logo" href="<?php echo esc_url( $url_wpe_logo ); ?>" target="_blank" aria-label="<?php esc_attr_e( 'WP Engine User Portal', 'php-compatibility-checker' ); ?>"><svg width="182" height="34" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 268.3 51"><g fill="#40BAC8"><path d="M17.4 51h16.4V38.6l-4-4h-8.5l-3.9 4zM38.6 17.3l-3.9 3.9v8.6l3.9 3.9h12.5V17.3zM33.8 0H17.4v12.5l3.9 3.9h8.5l4-3.9zM51.1 51V38.6l-3.9-4H34.7V51zM4 0L.1 3.9v12.5h16.4V0zM34.7 0v12.5l3.9 3.9h12.5V0zM25.6 27.9c-1.3 0-2.3-1.1-2.3-2.3 0-1.3 1.1-2.3 2.3-2.3 1.3 0 2.3 1.1 2.3 2.3 0 1.2-1 2.3-2.3 2.3zM16.5 17.3H.1v16.4h12.4l4-3.9zM16.5 38.6l-4-4H.1V51h12.4l4-3.9z"/></g><g fill="#162A33"><path d="M86.2 38.6c-.3 0-.4-.1-.5-.4l-4.1-14.5h-.1l-4.1 14.5c-.1.3-.2.4-.5.4h-4.8c-.3 0-.4-.1-.5-.4l-7-25.2c0-.2 0-.4.3-.4h6.3c.3 0 .5.2.5.4L75 28.1h.1l4-15.1c.1-.3.2-.4.5-.4h3.9c.3 0 .4.1.5.4l4.2 15.1h.1L91.5 13c0-.2.2-.4.5-.4h6.3c.2 0 .3.2.3.4l-7 25.2c-.1.3-.2.4-.5.4h-4.9zM103.6 38.6c-.2 0-.4-.2-.4-.4V13c0-.2.2-.4.4-.4H114c6.3 0 9.6 3.6 9.6 8.6s-3.3 8.7-9.6 8.7h-3.8c-.2 0-.2.1-.2.2v8c0 .2-.2.4-.4.4h-6zm13.3-17.3c0-1.8-1.2-2.9-3.3-2.9h-3.4c-.2 0-.2.1-.2.2V24c0 .2.1.2.2.2h3.4c2.1 0 3.3-1.2 3.3-2.9zM132.5 32.2c-.5-1.4-.7-3.1-.7-6.5 0-3.3.3-5.1.7-6.5 1.3-4.1 4.5-6.2 8.6-6.2 4.2 0 7.3 2.1 8.6 6.2.5 1.4.7 3 .7 6.1 0 .3-.2.5-.6.5h-16.3c-.2 0-.3.2-.3.4 0 2.7.2 4.2.6 5.5 1.2 3.7 3.9 5.3 7.5 5.3 3.4 0 5.9-1.5 7.4-3.5.2-.3.5-.3.7-.1l.3.3c.3.2.3.5.1.7-1.7 2.4-4.6 4.1-8.4 4.1-4.5 0-7.5-2.1-8.9-6.3zm16.2-7.8c.2 0 .3-.1.3-.3 0-1.7-.2-3.1-.6-4.3-1.1-3.5-3.7-5.3-7.2-5.3s-6.1 1.7-7.2 5.3c-.4 1.2-.6 2.5-.6 4.3 0 .2.1.3.3.3h15zM173.6 38c-.3 0-.5-.2-.5-.5V22.9c0-5.8-2.4-8.3-7.1-8.3-4.1 0-7.5 2.8-7.5 7.6v15.4c0 .3-.2.5-.5.5h-.5c-.3 0-.5-.2-.5-.5V14.2c0-.3.2-.5.5-.5h.5c.3 0 .5.2.5.5v3.4h.1c1.2-2.8 4-4.5 7.5-4.5 5.5 0 8.6 3.1 8.6 9.4v15c0 .3-.2.5-.5.5h-.6zM182 44.3c-.2-.3-.2-.6.1-.7l.4-.3c.3-.2.5-.1.7.2 1.4 1.8 3.5 2.9 6.5 2.9 4.6 0 7.6-2.3 7.6-8.3V34h-.1c-1.2 2.7-3.3 4.6-7.6 4.6-4.1 0-6.9-2.2-8.1-5.8-.6-1.7-.8-3.9-.8-6.9 0-3 .3-5.2.8-6.9 1.2-3.6 4-5.8 8.1-5.8 4.3 0 6.4 1.9 7.6 4.6h.1v-3.5c0-.3.2-.5.5-.5h.5c.3 0 .5.2.5.5v23.9c0 6.7-3.6 9.7-9.2 9.7-3.5-.1-6.4-1.7-7.6-3.6zm14.6-12.1c.5-1.5.7-3.3.7-6.4 0-3-.2-4.9-.7-6.4-1.2-3.6-3.8-4.9-6.8-4.9-3.3 0-5.7 1.6-6.7 4.8-.5 1.5-.8 3.6-.8 6.4 0 2.8.3 4.9.8 6.4 1.1 3.2 3.4 4.8 6.7 4.8 3 .2 5.7-1.1 6.8-4.7zM207.2 6.1c-.3 0-.5-.2-.5-.5v-2c0-.3.2-.5.5-.5h1.2c.3 0 .5.2.5.5v2.1c0 .3-.2.5-.5.5h-1.2zm.4 31.9c-.3 0-.5-.2-.5-.5V14.2c0-.3.2-.5.5-.5h.5c.3 0 .5.2.5.5v23.3c0 .3-.2.5-.5.5h-.5zM233.5 38c-.3 0-.5-.2-.5-.5V22.9c0-5.8-2.4-8.3-7.1-8.3-4.1 0-7.5 2.8-7.5 7.6v15.4c0 .3-.2.5-.5.5h-.5c-.3 0-.5-.2-.5-.5V14.2c0-.3.2-.5.5-.5h.5c.3 0 .5.2.5.5v3.4h.1c1.2-2.8 4-4.5 7.5-4.5 5.5 0 8.6 3.1 8.6 9.4v15c0 .3-.2.5-.5.5h-.6zM241.4 32.2c-.5-1.4-.7-3.1-.7-6.5 0-3.3.3-5.1.7-6.5 1.3-4.1 4.5-6.2 8.6-6.2 4.2 0 7.3 2.1 8.6 6.2.5 1.4.7 3 .7 6.1 0 .3-.2.5-.6.5h-16.3c-.2 0-.3.2-.3.4 0 2.7.2 4.2.6 5.5 1.2 3.7 3.9 5.3 7.5 5.3 3.4 0 5.9-1.5 7.4-3.5.2-.3.5-.3.7-.1l.3.3c.3.2.3.5.1.7-1.7 2.4-4.6 4.1-8.4 4.1-4.5 0-7.6-2.1-8.9-6.3zm16.1-7.8c.2 0 .3-.1.3-.3 0-1.7-.2-3.1-.6-4.3-1.1-3.5-3.7-5.3-7.2-5.3s-6.1 1.7-7.2 5.3c-.4 1.2-.6 2.5-.6 4.3 0 .2.1.3.3.3h15z"/></g><g><path fill="#162A33" d="M262.3 16.1c0-1.7 1.3-3 3-3s3 1.3 3 3-1.3 3-3 3-3-1.3-3-3zm5.5 0c0-1.5-1.1-2.5-2.5-2.5-1.5 0-2.5 1.1-2.5 2.5 0 1.5 1.1 2.5 2.5 2.5s2.5-1 2.5-2.5zm-3.5 1.7c-.1 0-.1 0-.1-.1v-3.1c0-.1 0-.1.1-.1h1.2c.7 0 1.1.4 1.1 1 0 .4-.2.8-.7.9l.7 1.3c.1.1 0 .2-.1.2h-.3c-.1 0-.1-.1-.2-.1l-.7-1.3h-.7v1.2c0 .1-.1.1-.1.1h-.2zm1.8-2.4c0-.3-.2-.5-.6-.5h-.8v1h.8c.4 0 .6-.2.6-.5z"/></g></svg></a>
+					<div class="wpe-pcc-aside-content">
+						<h2>
+							<?php
+							echo esc_html(
+								$host['name']
+									/* translators: %s: hosting company name, e.g. WP Engine */
+									? sprintf( __( 'PHP on %s', 'php-compatibility-checker' ), $host['name'] )
+									: __( 'PHP on this site', 'php-compatibility-checker' )
+							);
+							?>
+						</h2>
+						<p>
+							<?php
+							printf(
+								/* translators: %s: PHP version, e.g. 8.2.35 */
+								esc_html__( 'This site runs PHP %s.', 'php-compatibility-checker' ),
+								'<strong>' . esc_html( $release['current'] ) . '</strong>'
+							);
+							$php_status = $this->get_short_release_status( $release );
+							if ( $php_status ) {
+								echo ' ' . esc_html( $php_status );
+							}
+							?>
+						</p>
+						<?php // Filled in after a scan: which newer PHP the active plugins and theme are ready for (readiness-note.js). ?>
+						<p class="wpe-pcc-readiness" hidden></p>
+						<?php if ( $host['change_php'] ) : ?>
+							<?php echo wp_kses_post( wpautop( $host['change_php'] ) ); ?>
+						<?php endif; ?>
+						<?php foreach ( $host['links'] as $i => $link ) : ?>
+							<p><a target="_blank" rel="noopener noreferrer" <?php echo 0 === $i ? 'class="button"' : ''; ?> href="<?php echo esc_url( $link['url'] ); ?>"><?php echo esc_html( $link['label'] ); ?></a></p>
+						<?php endforeach; ?>
+					</div> <!-- /wpe-pcc-aside-content -->
 
-					<div class="wpe-pcc-get-hosting">
-						<div class="wpe-pcc-aside-content">
-							<h2><?php esc_html_e( 'Try a new PHP version safely', 'php-compatibility-checker' ); ?></h2>
-							<p>
-								<?php
-								printf(
-									/* translators: %s: PHP version, e.g. 8.2.35 */
-									esc_html__( 'This environment runs PHP %s.', 'php-compatibility-checker' ),
-									'<strong>' . esc_html( $release['current'] ) . '</strong>'
-								);
-								// The page notice has the full release message; keep this short.
-								switch ( $release['state'] ) {
-									case 'vulnerable':
-										$php_status = __( 'It has a critical security flaw that attackers are exploiting. Update PHP now.', 'php-compatibility-checker' );
-										break;
-									case 'update_available':
-										/* translators: %s: latest PHP release, e.g. 8.3.36 */
-										$php_status = sprintf( __( 'PHP %s is available.', 'php-compatibility-checker' ), $release['latest'] );
-										break;
-									case 'unsupported_branch':
-										$php_status = __( 'This version no longer gets security fixes.', 'php-compatibility-checker' );
-										break;
-									case 'vendor_build':
-										$php_status = __( 'Check your host\'s security notices for PHP fixes.', 'php-compatibility-checker' );
-										break;
-									default:
-										$php_status = $this->get_php_status_message();
-								}
-								if ( $php_status ) {
-									echo ' ' . esc_html( $php_status );
-								}
-								?>
-							</p>
-							<?php // Filled in after a scan: which newer PHP the active plugins and theme are ready for (queue-manager.js). ?>
-							<p class="wpe-pcc-readiness" hidden></p>
-							<p><?php echo wp_kses_post( __( '<strong>Preview it:</strong> in the User Portal, open this environment and click <strong>Preview PHP</strong>. Only your browser sees the change.', 'php-compatibility-checker' ) ); ?></p>
-							<p><?php echo wp_kses_post( __( '<strong>Or use a copy:</strong> change PHP on a staging or development environment first.', 'php-compatibility-checker' ) ); ?></p>
-							<a target="_blank" class="wpe-pcc-button wpe-pcc-button-primary" href="<?php echo esc_url( $url_wpe_portal ); ?>"><?php echo esc_html( defined( 'PWP_NAME' ) ? __( 'Open this environment', 'php-compatibility-checker' ) : __( 'Open the User Portal', 'php-compatibility-checker' ) ); ?></a>
-							<p><a target="_blank" href="<?php echo esc_url( $url_wpe_php_guide ); ?>"><?php esc_html_e( 'Read the WP Engine PHP guide', 'php-compatibility-checker' ); ?></a></p>
-						</div> <!-- /wpe-pcc-aside-content -->
-					</div> <!-- /wpe-pcc-get-hosting -->
-
-					<div style="display: none;" class="wpe-pcc-information wpe-pcc-information-errors">
-						<div class="wpe-pcc-aside-content">
-							<h2><?php esc_html_e( 'Need help fixing these issues?', 'php-compatibility-checker' ); ?></h2>
-							<p><?php esc_html_e( 'If an update doesn\'t fix a plugin or theme, or the problems are in custom code, a WP Engine agency partner can help.', 'php-compatibility-checker' ); ?></p>
-							<a target="_blank" class="wpe-pcc-button" href="<?php echo esc_url( $url_wpe_agency_partners ); ?>"><?php esc_html_e( 'Find a WP Engine partner', 'php-compatibility-checker' ); ?></a>
-						</div> <!-- /wpe-pcc-aside-content -->
-					</div> <!-- /wpe-pcc-information -->
-
+					<?php if ( $host['help']['text'] || $host['help']['links'] ) : ?>
+						<div style="display: none;" class="wpe-pcc-aside-content wpe-pcc-information wpe-pcc-information-errors">
+							<h2><?php esc_html_e( 'Need help with these problems?', 'php-compatibility-checker' ); ?></h2>
+							<?php if ( $host['help']['text'] ) : ?>
+								<p><?php echo esc_html( $host['help']['text'] ); ?></p>
+							<?php endif; ?>
+							<?php foreach ( $host['help']['links'] as $link ) : ?>
+								<p><a target="_blank" rel="noopener noreferrer" href="<?php echo esc_url( $link['url'] ); ?>"><?php echo esc_html( $link['label'] ); ?></a></p>
+							<?php endforeach; ?>
+						</div> <!-- /wpe-pcc-information -->
+					<?php endif; ?>
 				</div> <!-- /wpe-pcc-aside -->
 			<?php endif; ?>
 			</div> <!-- /wpe-pcc-layout -->
@@ -766,6 +756,32 @@ class PHP_Compatibility_Checker {
 			),
 			$url
 		);
+	}
+
+	/**
+	 * One sentence on the server's PHP release, for the panel beside the results.
+	 *
+	 * The notice at the top of the page has the full message; this stays short.
+	 *
+	 * @since 2.0.0
+	 *
+	 * @param array $release Status from Php_Releases::get_status().
+	 * @return string Empty string if there's nothing to say.
+	 */
+	public function get_short_release_status( array $release ) {
+		switch ( isset( $release['state'] ) ? $release['state'] : '' ) {
+			case 'vulnerable':
+				return __( 'It has a critical security flaw that attackers are exploiting. Update PHP now.', 'php-compatibility-checker' );
+			case 'update_available':
+				/* translators: %s: latest PHP release, e.g. 8.3.36 */
+				return sprintf( __( 'PHP %s is available.', 'php-compatibility-checker' ), $release['latest'] );
+			case 'unsupported_branch':
+				return __( 'This version no longer gets security fixes.', 'php-compatibility-checker' );
+			case 'vendor_build':
+				return __( 'Check your host\'s security notices for PHP fixes.', 'php-compatibility-checker' );
+			default:
+				return $this->get_php_status_message();
+		}
 	}
 
 	/**

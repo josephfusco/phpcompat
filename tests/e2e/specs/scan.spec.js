@@ -632,7 +632,7 @@ test.describe( 'PHP Compatibility scan', () => {
 		).toHaveCount( 0 );
 	} );
 
-	test( 'WP Engine sidebar only shows on WP Engine', async ( {
+	test( 'Host panel shows WP Engine details on WP Engine', async ( {
 		admin,
 		page,
 		requestUtils,
@@ -646,6 +646,9 @@ test.describe( 'PHP Compatibility scan', () => {
 
 		const aside = page.locator( '.wpe-pcc-aside' );
 		await expect( aside ).toBeVisible();
+		await expect(
+			aside.getByRole( 'heading', { name: 'PHP on WP Engine' } )
+		).toBeVisible();
 		await expect(
 			aside.getByRole( 'link', { name: 'Open this environment' } )
 		).toHaveAttribute( 'href', /my\.wpengine\.com\/installs\/e2esite/ );

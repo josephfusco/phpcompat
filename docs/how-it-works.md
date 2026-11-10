@@ -56,7 +56,7 @@ sequenceDiagram
 ```
 
 <p align="center">
-  <img src="../.github/images/scan-results.png" alt="Scan results: Broken Link Checker fails every PHP version and its PHP 8.4 problems are open, listing file, line and message; other plugins pass, and Contact Form 7 shows dashes for versions below its minimum." width="800">
+  <img src="../.github/images/scan-results.png" alt="Scan results: Broken Link Checker fails every PHP version and its PHP 8.4 problems are open, listing file, line and message; other plugins pass, and Contact Form 7 shows dashes for versions below its minimum. On the right, the WP Engine host panel." width="800">
 </p>
 
 The results also feed:
