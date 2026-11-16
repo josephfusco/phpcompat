@@ -7,6 +7,12 @@ updates:
       interval: weekly
     open-pull-requests-limit: 10
     groups:
+      # The PHP runtime the browser scans with. It ships in plugin/build, both
+      # packages must stay on the same version, and Scanner_Bundle::WASM_VERSION
+      # has to change with them (tests/WasmVersionTest.php fails until it does).
+      # Listed first so these never land in the auto-merged group below.
+      php-wasm:
+        patterns: ["@php-wasm/*"]
       # Build and test tooling only; nothing here ships in plugin/.
       npm-dev-minor-patch:
         dependency-type: development
