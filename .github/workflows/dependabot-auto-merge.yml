@@ -3,7 +3,9 @@ name: Dependabot auto-merge
 # Enables auto-merge on Dependabot PRs that only touch development dependencies
 # at the patch or minor level. GitHub then merges them once required checks
 # (the CI workflow) pass. Anything else — runtime dependencies, major bumps,
-# GitHub Actions updates — waits for a human.
+# GitHub Actions updates — waits for a human. So does @php-wasm/*: it's a dev
+# dependency, but webpack copies it into the plugin, and a new runtime needs a
+# real scan before it ships.
 #
 # Requires: "Allow auto-merge" enabled in repo settings, and branch protection
 # on main with the CI jobs marked as required status checks.
@@ -26,6 +28,7 @@ jobs:
       - name: Enable auto-merge for dev-only patch/minor updates
         if: >-
           steps.meta.outputs.dependency-type == 'direct:development' &&
+          !contains(steps.meta.outputs.dependency-names, '@php-wasm/') &&
           (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
            steps.meta.outputs.update-type == 'version-update:semver-minor')
         run: gh pr merge --auto --squash "$PR_URL"

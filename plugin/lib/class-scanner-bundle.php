@@ -164,6 +164,8 @@ class Scanner_Bundle {
 	/**
 	 * The php-wasm build the browser loads: @php-wasm/web-8-3, the same
 	 * version as the @php-wasm/universal bundled in build/wasm-worker.js.
+	 *
+	 * Must match both versions in package.json (tests/WasmVersionTest.php).
 	 */
 	const WASM_VERSION = '3.1.62';
 
