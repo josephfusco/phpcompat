@@ -17,7 +17,6 @@
  * { id, type: 'scan', files, versions }. Replies: { id, ok, result | error }.
  */
 import { PHP, loadPHPRuntime } from '@php-wasm/universal';
-import { jspi } from 'wasm-feature-detect';
 
 /** Where the scanner and the item's files go in PHP's file system. */
 const SCANNER_DIR = '/scanner';
@@ -27,7 +26,11 @@ const ITEM_DIR = '/scan/item';
 let scannerFiles = null;
 /** The loaded Emscripten module for PHP, reused for restarts. */
 let loader = null;
-let asyncMode = 'asyncify';
+/**
+ * Only the asyncify build ships. It runs in every browser; the JSPI build was
+ * about 4% faster in Chromium with identical results, not worth twice the size.
+ */
+const ASYNC_MODE = 'asyncify';
 /** The running PHP, or null after a crash. */
 let php = null;
 
@@ -80,15 +83,14 @@ async function init( { wasmBaseUrl, bundle, sha256 } ) {
 		globalThis.setImmediate = ( fn ) => setTimeout( fn, 0 );
 	}
 
-	asyncMode = ( await jspi() ) ? 'jspi' : 'asyncify';
 	loader = await import(
-		/* webpackIgnore: true */ `${ wasmBaseUrl }${ asyncMode }/php_8_3.js`
+		/* webpackIgnore: true */ `${ wasmBaseUrl }${ ASYNC_MODE }/php_8_3.js`
 	);
 	scannerFiles = files;
 	await start();
 
 	return {
-		asyncMode,
+		asyncMode: ASYNC_MODE,
 		verifyMs: Math.round( checked - started ),
 		bootMs: Math.round( performance.now() - checked ),
 		bundleFiles: Object.keys( files ).length,
@@ -100,7 +102,7 @@ async function init( { wasmBaseUrl, bundle, sha256 } ) {
  */
 async function start() {
 	const runtime = await loadPHPRuntime( loader, {
-		phpWasmAsyncMode: asyncMode,
+		phpWasmAsyncMode: ASYNC_MODE,
 		processId: 1,
 	} );
 	php = new PHP( runtime );

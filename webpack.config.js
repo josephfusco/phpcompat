@@ -23,7 +23,8 @@ module.exports = {
     new CopyWebpackPlugin({
       patterns: [
         {
-          from: "{asyncify,jspi}/**/*.{js,wasm}",
+          // Only the asyncify build: it runs in every browser (see wasm-worker.js).
+          from: "asyncify/**/*.{js,wasm}",
           context: path.dirname(require.resolve("@php-wasm/web-8-3/package.json")),
           to: `php-wasm/${wasmVersion}/[path][name][ext]`,
           info: { minimized: true },
