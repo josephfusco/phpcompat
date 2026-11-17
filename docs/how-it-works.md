@@ -23,7 +23,7 @@ flowchart LR
 
 Step by step:
 
-1. **Start PHP.** On the first scan the page downloads the scanner's files (`GET /scanner-bundle`), checks them against the SHA-256 in the plugin's build manifest, and keeps them in the browser's Cache Storage. The PHP runtime (`build/php-wasm/`, about 18 MB) loads from the plugin's own folder and the browser caches it. Both download again only when the plugin is updated. Browsers with JSPI (Chrome, Edge) use that build; Firefox and Safari use the Asyncify build.
+1. **Start PHP.** On the first scan the page downloads the scanner's files (`GET /scanner-bundle`), checks them against the SHA-256 in the plugin's build manifest, and keeps them in the browser's Cache Storage. The PHP runtime (`build/php-wasm/`, about 18 MB) loads from the plugin's own folder and the browser caches it. Both download again only when the plugin is updated. Every browser uses the same Asyncify build. A JSPI build was about 4% faster in Chrome with identical results, which wasn't worth doubling the download.
 2. **Plan.** The first request for each item (`POST /scan-batch`) returns the stored result if the item's files haven't changed, otherwise how many PHP files it has.
 3. **Batches.** Each following request returns the next few PHP files. The worker writes them into PHP's in-memory file system and runs `runner.php`, the same file WP-CLI runs on the server. PHP inside the worker has no network access and no WordPress; it reads those files and prints JSON.
 4. **Per-version results.** `runner.php` runs PHPCompatibilityWP once per PHP version (`testVersion` 7.4, 8.0, … 8.5), so each result means "this code breaks on PHP 8.x". To keep that fast, a first pass checks every file against the whole range and only the files it flags get the per-version passes.
@@ -114,5 +114,5 @@ Scanning is a resumable batch job, using the usual patterns for that:
 - **Static analysis.** Code isn't executed. Code paths that exist for backwards compatibility can show up as failures, and runtime problems won't show up at all.
 - **PHPCompatibility 10 is in alpha.** It's the release line with PHP 8.1–8.5 checks; coverage of some PHP 8.3–8.5 changes is still being added upstream. The exact versions are in every report and in `build/scanner.json`.
 - **The browser does the work.** WebAssembly PHP is about 3–4× slower per file than native PHP, so a first scan of a large site takes a few minutes and the tab has to stay open. Later scans only check what changed. WP-CLI (`wp php-compat scan`) runs the same scanner natively on the server.
-- **A bigger plugin.** The bundled PHP runtime makes the zip about 15 MB.
+- **A bigger plugin.** The bundled PHP runtime makes the zip about 8 MB.
 - **Multisite.** Only super admins can scan from the page, because scanning reads plugin code.
